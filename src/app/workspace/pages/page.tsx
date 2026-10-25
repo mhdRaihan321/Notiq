@@ -15,6 +15,114 @@ interface Page {
   updatedAt: string;
 }
 
+const DEFAULT_HOISTING_PAGE = {
+  id: 'page-js-hoisting-guide',
+  title: 'JavaScript Hoisting in Simple English',
+  icon: '⚡',
+  content: `# ⚡ JavaScript Hoisting in Simple English
+
+Hoisting is one of the most fundamental concepts in JavaScript, but it often confuses beginners. Here is a simple, clear, and practical explanation.
+
+---
+
+## 🎯 What is Hoisting?
+
+In JavaScript, **Hoisting** is the behavior where variable and function declarations are "lifted" or registered to the top of their scope before the code actually runs.
+
+Think of it this way:
+Before JavaScript runs a single line of code, it does a **Setup Phase** (Creation Phase). It reads your entire file, discovers every variable and function declaration, and allocates memory space for them.
+
+---
+
+## 1️⃣ Variable Hoisting: var vs let and const
+
+### 🔹 1. The \`var\` keyword (Hoisted with \`undefined\`)
+When you use \`var\`, JavaScript hoists the declaration to the top and initializes it with \`undefined\`.
+
+\`\`\`javascript
+console.log(framework); // Output: undefined (no error!)
+var framework = "React";
+console.log(framework); // Output: "React"
+\`\`\`
+
+**Behind the scenes, JavaScript treats it like this:**
+\`\`\`javascript
+var framework; // Declaration hoisted & initialized to undefined
+console.log(framework); // undefined
+framework = "React"; // Assignment stays on original line
+console.log(framework); // "React"
+\`\`\`
+
+---
+
+### 🔹 2. The \`let\` and \`const\` keywords (Temporal Dead Zone)
+\`let\` and \`const\` are also hoisted, but **they are NOT initialized**.
+
+From the start of the block until the line of declaration, the variable exists in what is called the **Temporal Dead Zone (TDZ)**. If you try to access it during this time, JavaScript throws a \`ReferenceError\`.
+
+\`\`\`javascript
+console.log(student); // ❌ ReferenceError: Cannot access 'student' before initialization
+let student = "Raihan";
+\`\`\`
+
+> **💡 Rule of thumb:**
+> - \`var\`: Hoisted and initialized to \`undefined\`.
+> - \`let\` & \`const\`: Hoisted, but placed in the TDZ until the code reaches their declaration.
+
+---
+
+## 2️⃣ Function Hoisting: Declarations vs Expressions
+
+### 🔹 Function Declarations (Fully Hoisted)
+Function declarations are hoisted with their **entire body**. You can safely call them before where they are written in the file!
+
+\`\`\`javascript
+sayHello("Brototype"); // ✅ "Hello, Brototype!"
+
+function sayHello(name) {
+  return \`Hello, \${name}!\`;
+}
+\`\`\`
+
+---
+
+### 🔹 Function Expressions and Arrow Functions (Not Function Hoisted)
+If you assign a function or arrow function to a variable, it follows **variable hoisting rules**:
+
+\`\`\`javascript
+greetUser(); // ❌ TypeError: greetUser is not a function (if var)
+             // ❌ ReferenceError (if const / let)
+
+const greetUser = () => {
+  console.log("Welcome back!");
+};
+\`\`\`
+
+---
+
+## 3️⃣ Quick Summary Table
+
+| Declaration Type | Is it Hoisted? | Initialized Value | Accessing Before Line Gives... |
+| :--- | :---: | :---: | :--- |
+| \`function name() {}\` | **Yes** | Entire function body | ✅ Runs without issue |
+| \`var x = 10\` | **Yes** | \`undefined\` | ⚠️ Returns \`undefined\` |
+| \`let x = 10\` | **Yes** | None (TDZ) | ❌ \`ReferenceError\` |
+| \`const x = 10\` | **Yes** | None (TDZ) | ❌ \`ReferenceError\` |
+| \`const fn = () => {}\` | **Yes** (as variable) | None (TDZ) | ❌ \`ReferenceError\` |
+
+---
+
+## 💡 Best Practices to Avoid Hoisting Bugs
+
+1. **Always use \`const\` and \`let\`** instead of \`var\`.
+2. **Declare variables at the top of their scope** before using them.
+3. **Declare functions or helper arrow functions before calling them** for readability and predictability.
+`,
+  type: 'page',
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
 export default function PagesListPage() {
   const { activeWorkspace } = useAuth();
   const [pages, setPages] = useState<Page[]>([]);
@@ -22,25 +130,81 @@ export default function PagesListPage() {
   const [creating, setCreating] = useState(false);
 
   const fetchPages = useCallback(async () => {
-    if (!activeWorkspace) return;
     setLoading(true);
+    let allPages: Page[] = [];
+
+    // 1. Fetch from backend API if activeWorkspace exists
+    if (activeWorkspace) {
+      try {
+        const { data } = await pageApi.getAll(activeWorkspace.id);
+        if (data?.pages) {
+          allPages = data.pages.filter((p: Page) => !p.parentId);
+        }
+      } catch { /* API fallback */ }
+    }
+
+    // 2. Load from localStorage
     try {
-      const { data } = await pageApi.getAll(activeWorkspace.id);
-      setPages(data.pages.filter((p: Page) => !p.parentId)); // top-level only
-    } catch { /* */ }
-    finally { setLoading(false); }
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('notiq_pages') : null;
+      if (raw) {
+        const localList: Page[] = JSON.parse(raw);
+        for (const lp of localList) {
+          if (!allPages.some(p => p.id === lp.id)) {
+            allPages.push(lp);
+          }
+        }
+      }
+    } catch {}
+
+    // 3. Ensure the JavaScript Hoisting guide is always seeded!
+    if (!allPages.some(p => p.id === DEFAULT_HOISTING_PAGE.id || p.title.toLowerCase().includes('hoisting'))) {
+      allPages.unshift(DEFAULT_HOISTING_PAGE as Page);
+      try {
+        const raw = typeof window !== 'undefined' ? localStorage.getItem('notiq_pages') : null;
+        const list = raw ? JSON.parse(raw) : [];
+        if (!list.some((p: any) => p.id === DEFAULT_HOISTING_PAGE.id)) {
+          list.unshift(DEFAULT_HOISTING_PAGE);
+          localStorage.setItem('notiq_pages', JSON.stringify(list));
+        }
+      } catch {}
+    }
+
+    setPages(allPages);
+    setLoading(false);
   }, [activeWorkspace]);
 
   useEffect(() => { fetchPages(); }, [fetchPages]);
 
   const createPage = async () => {
-    if (!activeWorkspace) return;
     setCreating(true);
+    const newId = `page-${Date.now()}`;
+    const newPageObj: Page = {
+      id: newId,
+      title: 'Untitled Page',
+      icon: '📄',
+      type: 'page',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (activeWorkspace) {
+      try {
+        const { data } = await pageApi.create({ title: 'Untitled Page', workspaceId: activeWorkspace.id });
+        if (data?.page?.id) {
+          newPageObj.id = data.page.id;
+        }
+      } catch { /* fallback */ }
+    }
+
+    // Save to local storage
     try {
-      const { data } = await pageApi.create({ title: 'Untitled', workspaceId: activeWorkspace.id });
-      // Redirect to the new page
-      window.location.href = `/workspace/pages/${data.page.id}`;
-    } catch { setCreating(false); }
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('notiq_pages') : null;
+      const list = raw ? JSON.parse(raw) : [];
+      list.unshift(newPageObj);
+      localStorage.setItem('notiq_pages', JSON.stringify(list));
+    } catch {}
+
+    window.location.href = `/workspace/pages/${newPageObj.id}`;
   };
 
   return (

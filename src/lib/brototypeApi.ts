@@ -209,20 +209,102 @@ export const parseTopicSubItems = (description: string): SubItem[] => {
   return items;
 };
 
-export const syncTaskToNotiqTodos = async (task: BrototypeTask, workspaceId: string) => {
+export const syncTaskToNotiqTodos = async (task: BrototypeTask, workspaceId?: string): Promise<any[]> => {
   if (task.tasktype && task.tasktype.trim().toLowerCase() !== 'technical') {
     throw new Error('Only Technical tasks can be synced.');
   }
-  const title = `[Brototype] ${task.taskname}`;
-  const description = `${task.description || ''}\n\nSemester: ${task.semesterName} | Paper: ${task.paperName} | Topics: ${task.topicsCount}`;
-  
-  return todoApi.create({
-    title,
-    description,
-    workspaceId,
-    priority: 'high',
-    dueDate: task.assignedAt ? task.assignedAt.split('T')[0] : null,
-    status: task.taskStatus?.toLowerCase() === 'completed' ? 'done' : 'todo',
-    tags: ['Brototype', 'Technical', task.semesterName || 'Sem1', task.paperName || 'Paper1'].filter(Boolean),
-  });
+
+  // 1. Fetch full details if topics are not already loaded
+  let fullTask: BrototypeTask = task;
+  if (!fullTask.topics || fullTask.topics.length === 0) {
+    try {
+      fullTask = await fetchBrototypeTaskDetail(task.taskAssignmentIdentifier);
+    } catch {
+      fullTask = task;
+    }
+  }
+
+  const topics = fullTask.topics || [];
+  const generatedTodos: any[] = [];
+
+  if (topics.length > 0) {
+    for (const top of topics) {
+      const subItems = parseTopicSubItems(top.description || '');
+      generatedTodos.push({
+        id: `bt-top-${top.taskAssignmentTopicIdentifier || top.taskAssignmentTopicId || Math.random().toString(36).substring(2, 9)}`,
+        title: top.topicName || fullTask.taskname,
+        topicHeading: `${fullTask.paperName || 'Paper'} • ${top.topicName || 'Topic'}`,
+        description: top.description || '',
+        status: fullTask.taskStatus?.toLowerCase() === 'completed' ? 'done' : 'todo',
+        priority: 'high',
+        dueDate: fullTask.assignedAt ? fullTask.assignedAt.split('T')[0] : '',
+        assignedAt: fullTask.assignedAt,
+        tags: ['Brototype', 'Technical', fullTask.semesterName || 'Sem 1', fullTask.paperName || 'Paper 1'].filter(Boolean),
+        subItems,
+        createdAt: fullTask.assignedAt || new Date().toISOString(),
+      });
+    }
+  } else {
+    const subItems = parseTopicSubItems(fullTask.description || '');
+    generatedTodos.push({
+      id: `bt-${fullTask.taskAssignmentIdentifier}`,
+      title: fullTask.taskname,
+      topicHeading: `${fullTask.semesterName} • ${fullTask.paperName}`,
+      description: fullTask.description || '',
+      status: fullTask.taskStatus?.toLowerCase() === 'completed' ? 'done' : 'todo',
+      priority: 'high',
+      dueDate: fullTask.assignedAt ? fullTask.assignedAt.split('T')[0] : '',
+      assignedAt: fullTask.assignedAt,
+      tags: ['Brototype', 'Technical', fullTask.semesterName || 'Sem 1', fullTask.paperName || 'Paper 1'].filter(Boolean),
+      subItems,
+      createdAt: fullTask.assignedAt || new Date().toISOString(),
+    });
+  }
+
+  // 2. Persist to localStorage 'notiq_todos' with sub-items checklist
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('notiq_todos');
+      let existing: any[] = raw ? JSON.parse(raw) : [];
+      const normalize = (s?: string) =>
+        (s || '').toLowerCase().replace(/^\[brototype\]\s*/i, '').replace(/[^a-z0-9]/g, '').trim();
+
+      // Remove any existing placeholder for this task that had empty subItems
+      const parentNorm = normalize(task.taskname);
+      existing = existing.filter((e) => {
+        const matchesParent = normalize(e.title) === parentNorm || e.id === `bt-${task.taskAssignmentIdentifier}`;
+        const hasNoSubs = !e.subItems || e.subItems.length === 0;
+        return !(matchesParent && hasNoSubs);
+      });
+
+      const existingTitles = new Set(existing.map((e) => normalize(e.title)));
+      const existingIds = new Set(existing.map((e) => e.id));
+
+      const newToSave = generatedTodos.filter((g) => !existingTitles.has(normalize(g.title)) && !existingIds.has(g.id));
+      if (newToSave.length > 0) {
+        const merged = [...newToSave, ...existing];
+        localStorage.setItem('notiq_todos', JSON.stringify(merged));
+        window.dispatchEvent(new Event('notiq_todos_updated'));
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  // 3. Persist to backend if workspaceId is provided
+  if (workspaceId) {
+    for (const g of generatedTodos) {
+      todoApi.create({
+        title: g.title,
+        description: g.description,
+        workspaceId,
+        priority: g.priority,
+        dueDate: g.dueDate || null,
+        status: g.status,
+        tags: g.tags,
+      }).catch(() => {});
+    }
+  }
+
+  return generatedTodos;
 };

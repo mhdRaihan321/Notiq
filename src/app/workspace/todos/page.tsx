@@ -14,7 +14,7 @@ import {
 } from '@/lib/brototypeApi';
 import BrototypeModal from '@/components/BrototypeModal';
 import { generateLearningNotesForTask } from '@/lib/aiService';
-import TaskDetailSideMenu from '@/components/TaskDetailSideMenu';
+import TaskDetailSideMenu, { getTaskIcon } from '@/components/TaskDetailSideMenu';
 
 export interface Todo {
   id: string;
@@ -35,17 +35,17 @@ export interface Todo {
   createdAt: string;
 }
 
-const PRIORITY_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  low: { label: 'Low', color: '#22c55e', bg: 'rgba(34, 197, 94, 0.15)' },
-  medium: { label: 'Medium', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' },
-  high: { label: 'High', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },
-  urgent: { label: 'Urgent', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' },
+const PRIORITY_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  low: { label: 'Low', color: '#34d399', bg: 'rgba(16, 185, 129, 0.14)', border: 'rgba(16, 185, 129, 0.35)' },
+  medium: { label: 'Medium', color: '#60a5fa', bg: 'rgba(59, 130, 246, 0.14)', border: 'rgba(59, 130, 246, 0.35)' },
+  high: { label: 'High', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.14)', border: 'rgba(245, 158, 11, 0.35)' },
+  urgent: { label: 'Urgent', color: '#f87171', bg: 'rgba(239, 68, 68, 0.14)', border: 'rgba(239, 68, 68, 0.35)' },
 };
 
-const COLUMNS: Array<{ id: 'todo' | 'in_progress' | 'done'; title: string; icon: string }> = [
-  { id: 'todo', title: 'To Do', icon: '📌' },
-  { id: 'in_progress', title: 'In Progress', icon: '⏳' },
-  { id: 'done', title: 'Completed', icon: '✅' },
+const COLUMNS: Array<{ id: 'todo' | 'in_progress' | 'done'; title: string; icon: string; accentColor: string; bgTint: string }> = [
+  { id: 'todo', title: 'To Do', icon: '📌', accentColor: '#6366f1', bgTint: 'rgba(99, 102, 241, 0.04)' },
+  { id: 'in_progress', title: 'In Progress', icon: '⏳', accentColor: '#f59e0b', bgTint: 'rgba(245, 158, 11, 0.04)' },
+  { id: 'done', title: 'Completed', icon: '✅', accentColor: '#10b981', bgTint: 'rgba(16, 185, 129, 0.04)' },
 ];
 
 export default function TodosPage() {
@@ -223,7 +223,11 @@ function TodosPageInner() {
       fetchTodos();
     };
     window.addEventListener('notiq:todo-created', handleTodoCreated);
-    return () => window.removeEventListener('notiq:todo-created', handleTodoCreated);
+    window.addEventListener('notiq_todos_updated', handleTodoCreated);
+    return () => {
+      window.removeEventListener('notiq:todo-created', handleTodoCreated);
+      window.removeEventListener('notiq_todos_updated', handleTodoCreated);
+    };
   }, [fetchTodos]);
 
   const saveTodosToStorage = (updatedList: Todo[]) => {
@@ -1178,8 +1182,13 @@ ${checklistMd}
                         onDragOver={(e) => handleDragOverCol(e, col.id)}
                         onDrop={(e) => handleDropOnCol(e, col.id)}
                         style={{
-                          background: isTarget ? 'rgba(124, 58, 237, 0.08)' : 'var(--bg-secondary)',
-                          border: isTarget ? '2px dashed var(--accent)' : '1px solid var(--border)',
+                          background: isTarget
+                            ? `${col.accentColor}18`
+                            : `linear-gradient(180deg, ${col.bgTint} 0%, rgba(20, 20, 28, 0.7) 100%)`,
+                          borderLeft: isTarget ? `2px dashed ${col.accentColor}` : '1px solid rgba(255, 255, 255, 0.08)',
+                          borderRight: isTarget ? `2px dashed ${col.accentColor}` : '1px solid rgba(255, 255, 255, 0.08)',
+                          borderBottom: isTarget ? `2px dashed ${col.accentColor}` : '1px solid rgba(255, 255, 255, 0.08)',
+                          borderTop: `3px solid ${col.accentColor}`,
                           borderRadius: 14,
                           padding: 16,
                           minHeight: 520,
@@ -1189,18 +1198,19 @@ ${checklistMd}
                         }}
                       >
                         {/* Column Header */}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 10, borderBottom: '1px solid var(--border)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span>{col.icon}</span>
-                            <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>{col.title}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 10, borderBottom: '1px solid rgba(255, 255, 255, 0.07)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                            <span style={{ fontSize: 16 }}>{col.icon}</span>
+                            <span style={{ fontWeight: 700, fontSize: 15, color: '#f8fafc', letterSpacing: '-0.2px' }}>{col.title}</span>
                           </div>
                           <span style={{
                             fontSize: 12,
-                            fontWeight: 600,
-                            padding: '2px 8px',
-                            borderRadius: 10,
-                            background: 'var(--bg-tertiary)',
-                            color: 'var(--text-muted)',
+                            fontWeight: 700,
+                            padding: '2px 9px',
+                            borderRadius: 99,
+                            background: `${col.accentColor}22`,
+                            color: col.accentColor,
+                            border: `1px solid ${col.accentColor}44`,
                           }}>
                             {colTodos.length}
                           </span>
@@ -2188,14 +2198,14 @@ function TaskCard({
       onDrop={onDropOnCard}
       onClick={onSelect}
       style={{
-        background: 'var(--bg-tertiary, #1a1a24)',
-        border: isSelected ? '2px solid #3b82f6' : '1px solid var(--border)',
+        background: isSelected ? '#1e293b' : 'var(--bg-tertiary, #18191c)',
+        border: isSelected ? '1px solid #3b82f6' : '1px solid rgba(255, 255, 255, 0.08)',
         borderRadius: 12,
         padding: 14,
         cursor: 'pointer',
         opacity: isDragging ? 0.35 : 1,
         transition: 'all 0.15s ease',
-        boxShadow: isSelected ? '0 0 0 3px rgba(59, 130, 246, 0.25), 0 4px 16px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.2)',
+        boxShadow: isSelected ? '0 0 0 2px rgba(59, 130, 246, 0.35), 0 4px 16px rgba(0,0,0,0.35)' : '0 2px 8px rgba(0,0,0,0.2)',
         position: 'relative',
       }}
       onMouseEnter={(e) => {
@@ -2206,17 +2216,22 @@ function TaskCard({
       }}
     >
       {/* Top Meta: Topic Heading & Priority Customizer */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9, gap: 8 }}>
         {todo.topicHeading ? (
           <span style={{
-            fontSize: 11,
+            fontSize: 10.5,
             fontWeight: 700,
             textTransform: 'uppercase',
-            letterSpacing: '0.5px',
-            color: 'var(--accent)',
+            letterSpacing: '0.4px',
+            color: '#c7d2fe',
+            background: 'rgba(99, 102, 241, 0.14)',
+            border: '1px solid rgba(99, 102, 241, 0.28)',
+            padding: '2px 8px',
+            borderRadius: 5,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
+            maxWidth: '72%',
           }}>
             {todo.topicHeading}
           </span>
@@ -2235,16 +2250,17 @@ function TaskCard({
             style={{
               background: pConf.bg,
               color: pConf.color,
-              border: `1px solid ${pConf.color}40`,
+              border: `1px solid ${pConf.border || pConf.color + '40'}`,
               fontSize: 11,
-              fontWeight: 600,
-              padding: '2px 8px',
+              fontWeight: 700,
+              padding: '2.5px 8px',
               borderRadius: 6,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: 4,
               transition: 'all 0.15s',
+              boxShadow: `0 2px 6px ${pConf.color}20`,
             }}
           >
             <span>{pConf.label}</span>
@@ -2294,7 +2310,7 @@ function TaskCard({
       </div>
 
       {/* Main Task Title & Status Toggle */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 9 }}>
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -2302,36 +2318,44 @@ function TaskCard({
           }}
           title={todo.status === 'done' ? 'Mark Incomplete' : 'Mark Completed'}
           style={{
-            width: 19,
-            height: 19,
-            borderRadius: 5,
+            width: 20,
+            height: 20,
+            borderRadius: 6,
             marginTop: 2,
             flexShrink: 0,
             cursor: 'pointer',
-            border: todo.status === 'done' ? 'none' : '2px solid var(--border-light)',
-            background: todo.status === 'done' ? 'var(--accent)' : 'transparent',
+            border: todo.status === 'done' ? 'none' : '1.5px solid rgba(255, 255, 255, 0.35)',
+            background: todo.status === 'done' ? 'linear-gradient(135deg, #10b981, #059669)' : 'rgba(255, 255, 255, 0.04)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#fff',
             fontSize: 12,
+            fontWeight: 700,
+            boxShadow: todo.status === 'done' ? '0 2px 8px rgba(16, 185, 129, 0.4)' : 'none',
             transition: 'all 0.15s ease',
           }}
         >
           {todo.status === 'done' && '✓'}
         </button>
 
-        <h4 style={{
-          fontSize: 14,
-          fontWeight: 600,
-          margin: 0,
-          lineHeight: 1.4,
-          flex: 1,
-          color: todo.status === 'done' ? 'var(--text-muted)' : 'var(--text-primary)',
-          textDecoration: todo.status === 'done' ? 'line-through' : 'none',
-        }}>
-          {todo.title}
-        </h4>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 16, lineHeight: '20px', flexShrink: 0, marginTop: 1 }}>
+            {getTaskIcon(todo.title, todo.topicHeading)}
+          </span>
+          <h4 style={{
+            fontSize: 15,
+            fontWeight: 700,
+            margin: 0,
+            lineHeight: 1.38,
+            flex: 1,
+            color: todo.status === 'done' ? '#94a3b8' : '#ffffff',
+            textDecorationLine: todo.status === 'done' ? 'line-through' : 'none',
+            letterSpacing: '-0.15px',
+          }}>
+            {todo.title}
+          </h4>
+        </div>
       </div>
 
       {/* Sub-Items Progress Bar */}
@@ -2477,13 +2501,15 @@ function TaskCard({
                 {/* Sub-item Content Text */}
                 <span
                   style={{
-                    fontSize: 12.5,
+                    fontSize: 13,
+                    fontWeight: 650,
                     lineHeight: 1.48,
-                    color: sub.completed ? 'var(--text-muted, #64748b)' : 'var(--text-secondary, #e2e8f0)',
-                    textDecoration: sub.completed ? 'line-through' : 'none',
-                    textDecorationColor: 'rgba(52, 211, 153, 0.5)',
+                    color: sub.completed ? 'rgba(255, 255, 255, 0.45)' : '#ffffff',
+                    textDecorationLine: sub.completed ? 'line-through' : 'none',
+                    textDecorationColor: 'rgba(52, 211, 153, 0.7)',
                     opacity: sub.completed ? 0.72 : 1,
                     flex: 1,
+                    letterSpacing: '-0.1px',
                     transition: 'all 0.18s ease',
                   }}
                 >

@@ -37,18 +37,18 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   done: { label: 'Done', color: '#4ade80', bg: 'rgba(34, 197, 94, 0.18)' },
 };
 
-// Choose dynamic icon based on task title/topic
-function getTaskIcon(title: string, topic?: string): string {
+// Choose dynamic icon based on task title/topic matching Brototype curriculum
+export function getTaskIcon(title: string, topic?: string): string {
   const text = `${title} ${topic || ''}`.toLowerCase();
-  if (text.includes('array') || text.includes('data')) return '🧩';
-  if (text.includes('modern') || text.includes('es6')) return '⚡';
-  if (text.includes('dom') || text.includes('browser')) return '🌐';
-  if (text.includes('error') || text.includes('debug')) return '🛠️';
-  if (text.includes('object') || text.includes('oop')) return '🏮';
-  if (text.includes('async') || text.includes('promise')) return '⌛';
-  if (text.includes('ai') || text.includes('think')) return '🗃️';
-  if (text.includes('advanced')) return '🗂️';
-  if (text.includes('core') || text.includes('concept')) return '🔴';
+  if (text.includes('core') || text.includes('concept') || text.includes('basics')) return '🧠';
+  if (text.includes('array') || text.includes('data') || text.includes('slice')) return '🧩';
+  if (text.includes('modern') || text.includes('es6') || text.includes('syntax')) return '⚡';
+  if (text.includes('dom') || text.includes('browser') || text.includes('event')) return '🌐';
+  if (text.includes('error') || text.includes('debug') || text.includes('exception')) return '🛠️';
+  if (text.includes('object') || text.includes('oop') || text.includes('oriented')) return '🏗️';
+  if (text.includes('async') || text.includes('promise') || text.includes('await') || text.includes('callback')) return '⌛';
+  if (text.includes('ai') || text.includes('thinking with ai') || text.includes('intelligence')) return '🤖';
+  if (text.includes('advanced') || text.includes('hoisting') || text.includes('closure')) return '🔄';
   return '📌';
 }
 
@@ -950,10 +950,12 @@ export default function TaskDetailSideMenu({
                 <div
                   style={{
                     flex: 1,
-                    fontSize: 13,
+                    fontSize: 13.5,
+                    fontWeight: 650,
                     lineHeight: 1.45,
-                    color: item.completed ? '#64748b' : '#f1f5f9',
-                    textDecoration: item.completed ? 'line-through' : 'none',
+                    color: item.completed ? 'rgba(255, 255, 255, 0.45)' : '#ffffff',
+                    textDecorationLine: item.completed ? 'line-through' : 'none',
+                    letterSpacing: '-0.1px',
                   }}
                 >
                   {formatItemText(item.text)}
