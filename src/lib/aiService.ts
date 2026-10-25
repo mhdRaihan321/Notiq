@@ -34,6 +34,19 @@ Your capabilities:
 3. Providing clear, concise, well-formatted markdown responses (headings, bullets, checklists, bold, code).
 4. Assisting with Brototype learning progress, coding tasks, study plans, reflections.
 
+CRITICAL PAGE & DOCUMENT CREATION RULES:
+When the user asks you to "make a page", "create a page", "draft a document", or write learning notes on a topic (e.g. "make a page and in that write about Js hoisting in simple English"):
+1. First, explain the topic clearly and conversationally in your response.
+2. At the end of your response, output a structured page definition in this exact format:
+\`\`\`notiq-page
+{
+  "title": "Clear and Clean Title (e.g. JavaScript Hoisting in Simple English)",
+  "icon": "⚡",
+  "content": "# JavaScript Hoisting in Simple English\\n\\nFull markdown formatted content with headings, examples, code snippets, tables, and takeaways..."
+}
+\`\`\`
+This allows the user to click one button to instantly save it as a new Page inside their Notiq workspace!
+
 CRITICAL TASK & CHECKLIST CREATION RULES:
 When the user asks you to add, create, or schedule a task, or provides a title with topics/subtopics (e.g. "Pending Topic: Array slice vs Array splice, forEach, map... add this to the todo"):
 1. Always FIRST answer the user's question, explain the concepts, or provide helpful guidance conversationally in markdown.
@@ -59,7 +72,7 @@ When the user asks you to add, create, or schedule a task, or provides a title w
   "tags": ["tag1", "tag2"]
 }
 \`\`\`
-Only output the notiq-task block when a task or action item is requested or relevant. Keep responses polite, focused, and actionable.`;
+Only output the notiq-task or notiq-page block when requested or relevant. Keep responses polite, focused, and actionable.`;
 
 function buildContents(prompt?: string, history: Array<{ role: string; content: string }> = [], context: Record<string, any> = {}) {
   const contents: any[] = [];

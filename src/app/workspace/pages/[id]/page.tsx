@@ -45,17 +45,45 @@ function PageDetailPageInner() {
 
   const loadPage = useCallback(async () => {
     setLoading(true);
+    let loadedPage: Page | null = null;
+
     try {
       const { data } = await pageApi.getOne(pageId);
-      setPage(data.page);
-      setTitle(data.page.title || '');
-      setContent(data.page.content || '');
-      setIcon(data.page.icon || '📄');
+      if (data?.page) {
+        loadedPage = data.page;
+      }
     } catch {
-      router.replace('/workspace/pages');
-    } finally {
-      setLoading(false);
+      // API error or offline - fallback to localStorage
     }
+
+    if (!loadedPage && typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('notiq_pages');
+        if (raw) {
+          const list = JSON.parse(raw);
+          const found = list.find((p: any) => p.id === pageId);
+          if (found) {
+            loadedPage = {
+              id: found.id,
+              title: found.title,
+              content: found.content || '',
+              icon: found.icon || '📄',
+              isPublic: false,
+            };
+          }
+        }
+      } catch {}
+    }
+
+    if (loadedPage) {
+      setPage(loadedPage);
+      setTitle(loadedPage.title || '');
+      setContent(loadedPage.content || '');
+      setIcon(loadedPage.icon || '📄');
+    } else {
+      router.replace('/workspace/pages');
+    }
+    setLoading(false);
   }, [pageId, router]);
 
   useEffect(() => { loadPage(); }, [loadPage]);
@@ -65,7 +93,30 @@ function PageDetailPageInner() {
     try {
       await pageApi.update(pageId, { title: t || 'Untitled', content: c, icon: i });
       setLastSaved(new Date());
-    } catch { /* */ }
+    } catch { /* API fallback */ }
+
+    // Sync to localStorage
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem('notiq_pages');
+        const list = raw ? JSON.parse(raw) : [];
+        const idx = list.findIndex((p: any) => p.id === pageId);
+        const updatedObj = {
+          id: pageId,
+          title: t || 'Untitled',
+          content: c,
+          icon: i,
+          updatedAt: new Date().toISOString(),
+        };
+        if (idx >= 0) {
+          list[idx] = { ...list[idx], ...updatedObj };
+        } else {
+          list.unshift(updatedObj);
+        }
+        localStorage.setItem('notiq_pages', JSON.stringify(list));
+      }
+      setLastSaved(new Date());
+    } catch {}
     finally { setSaving(false); }
   }, [pageId]);
 

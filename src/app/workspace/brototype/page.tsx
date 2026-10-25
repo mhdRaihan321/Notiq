@@ -82,16 +82,21 @@ export default function BrototypeHubPage() {
       return;
     }
 
-    // Check if task is already in todos
+    // Check if task is already in todos with complete sub-items
     const existingRaw = typeof window !== 'undefined' ? localStorage.getItem('notiq_todos') : null;
     if (existingRaw) {
       try {
         const existingTodos = JSON.parse(existingRaw);
         const normalize = (s?: string) => (s || '').toLowerCase().replace(/^\[brototype\]\s*/i, '').replace(/[^a-z0-9]/g, '').trim();
         const normTask = normalize(task.taskname);
-        const alreadyExists = existingTodos.some((t: any) => normalize(t.title) === normTask || t.id === `bt-${task.taskAssignmentIdentifier}`);
-        if (alreadyExists) {
-          setImportSuccessMsg(`ℹ️ Already added! "${task.taskname}" is already in your Todos.`);
+        const alreadyWithSubs = existingTodos.some(
+          (t: any) =>
+            (normalize(t.title) === normTask || t.id === `bt-${task.taskAssignmentIdentifier}`) &&
+            t.subItems &&
+            t.subItems.length > 0
+        );
+        if (alreadyWithSubs) {
+          setImportSuccessMsg(`ℹ️ Already added! "${task.taskname}" is already in your Todos with its checklist.`);
           setTimeout(() => setImportSuccessMsg(''), 5000);
           return;
         }
@@ -100,9 +105,15 @@ export default function BrototypeHubPage() {
 
     setImportingTaskId(task.taskAssignmentIdentifier);
     try {
-      await syncTaskToNotiqTodos(task, activeWorkspace.id);
-      setImportSuccessMsg(`Imported "${task.taskname}" into your Todos!`);
-      setTimeout(() => setImportSuccessMsg(''), 4000);
+      const imported = await syncTaskToNotiqTodos(task, activeWorkspace.id);
+      const count = imported.length;
+      const totalChecklistItems = imported.reduce((acc, t) => acc + (t.subItems?.length || 0), 0);
+      if (count > 1) {
+        setImportSuccessMsg(`🎉 Added "${task.taskname}" with ${count} topic cards (${totalChecklistItems} checklist items) into your Todos!`);
+      } else {
+        setImportSuccessMsg(`🎉 Added "${task.taskname}" with ${totalChecklistItems} checklist items into your Todos!`);
+      }
+      setTimeout(() => setImportSuccessMsg(''), 5000);
     } catch (err: any) {
       setError('Import failed: ' + (err?.message || 'Unknown error'));
       setTimeout(() => setError(''), 5000);
@@ -127,28 +138,36 @@ export default function BrototypeHubPage() {
     }
 
     const normalize = (s?: string) => (s || '').toLowerCase().replace(/^\[brototype\]\s*/i, '').replace(/[^a-z0-9]/g, '').trim();
-    const existingSet = new Set(existingTodos.map((t: any) => normalize(t.title)));
+    const existingSet = new Set(existingTodos.filter((et: any) => et.subItems && et.subItems.length > 0).map((t: any) => normalize(t.title)));
 
-    const tasksToImport = filteredTasks.filter((t) => !existingSet.has(normalize(t.taskname)) && !existingTodos.some((et: any) => et.id === `bt-${t.taskAssignmentIdentifier}`));
+    const tasksToImport = filteredTasks.filter(
+      (t) =>
+        !existingSet.has(normalize(t.taskname)) &&
+        !existingTodos.some((et: any) => et.id === `bt-${t.taskAssignmentIdentifier}` && et.subItems && et.subItems.length > 0)
+    );
 
     if (tasksToImport.length === 0) {
-      setImportSuccessMsg(`ℹ️ All ${filteredTasks.length} tasks are already in your Todos! No duplicates imported.`);
+      setImportSuccessMsg(`ℹ️ All ${filteredTasks.length} tasks are already in your Todos with their checklists! No duplicates imported.`);
       setTimeout(() => setImportSuccessMsg(''), 5000);
       return;
     }
 
     setLoading(true);
     try {
+      let totalCreated = 0;
+      let totalSubs = 0;
       for (const t of tasksToImport) {
-        await syncTaskToNotiqTodos(t, activeWorkspace.id);
+        const res = await syncTaskToNotiqTodos(t, activeWorkspace.id);
+        totalCreated += res.length;
+        totalSubs += res.reduce((acc, item) => acc + (item.subItems?.length || 0), 0);
       }
       const skippedCount = filteredTasks.length - tasksToImport.length;
       if (skippedCount > 0) {
-        setImportSuccessMsg(`🎉 Imported ${tasksToImport.length} new tasks! (${skippedCount} already in Todos were skipped).`);
+        setImportSuccessMsg(`🎉 Imported ${totalCreated} topics with ${totalSubs} checklist items! (${skippedCount} already in Todos were skipped).`);
       } else {
-        setImportSuccessMsg(`🎉 Successfully imported all ${tasksToImport.length} tasks into your Todos!`);
+        setImportSuccessMsg(`🎉 Successfully imported all ${totalCreated} topics with ${totalSubs} checklist items into your Todos!`);
       }
-      setTimeout(() => setImportSuccessMsg(''), 5000);
+      setTimeout(() => setImportSuccessMsg(''), 6000);
     } catch (err: any) {
       setError('Error during bulk import: ' + err.message);
       setTimeout(() => setError(''), 5000);

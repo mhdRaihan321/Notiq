@@ -3,13 +3,22 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { streamAI, AIMessage } from '@/lib/aiService';
 import { useAuth } from '@/contexts/AuthContext';
-import { todoApi } from '@/lib/api';
+import { todoApi, pageApi } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { 
   Sparkles, Send, Copy, Check, Trash2, RotateCcw, 
   Bot, User, ArrowDown, ExternalLink, Lightbulb, ChevronRight,
-  Plus, Calendar, CheckCircle2, AlertCircle
+  Plus, Calendar, CheckCircle2, AlertCircle, FileText, Clock,
+  History, X, CheckSquare, Layers
 } from 'lucide-react';
+
+export interface AIChatSession {
+  id: string;
+  title: string;
+  preview: string;
+  updatedAt: string;
+  messages: AIMessage[];
+}
 
 export interface AIAssistantProps {
   /** Mode of presentation */
@@ -34,15 +43,27 @@ export interface AIAssistantProps {
   showHeader?: boolean;
 }
 
+function formatTimeAgo(isoString: string): string {
+  try {
+    const diff = (Date.now() - new Date(isoString).getTime()) / 1000;
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  } catch {
+    return '';
+  }
+}
+
 export default function AIAssistant({
   mode = 'full',
   context = {},
-  placeholder = 'Ask Notiq AI anything or tell it to create a task...',
+  placeholder = 'Ask Notiq AI anything or tell it to create a task or page...',
   quickSuggestions = [
-    '📋 Add task: Master Node.js Event Loop for review',
-    '🎯 Key tips for Brototype reviews',
-    '💡 Break down auth architecture & add task',
-    '📝 Draft a clean summary note',
+    '📄 Make a page about JS Hoisting in simple English',
+    '📋 Add task: Master Node.js Event Loop with checklist',
+    '🎯 Key tips for Brototype technical reviews',
+    '💡 Break down auth architecture & add page',
   ],
   onResponse,
   onInsert,
@@ -53,6 +74,12 @@ export default function AIAssistant({
 }: AIAssistantProps) {
   const { activeWorkspace } = useAuth();
   const router = useRouter();
+
+  // Chat sessions history (max 5 preview chats)
+  const [sessions, setSessions] = useState<AIChatSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>(() => `session-${Date.now()}`);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+
   const [messages, setMessages] = useState<AIMessage[]>([
     {
       id: 'welcome',
@@ -65,11 +92,70 @@ export default function AIAssistant({
   const [isLoading, setIsLoading] = useState(false);
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedCodeKey, setCopiedCodeKey] = useState<string | null>(null);
+  const [savingPageMsgId, setSavingPageMsgId] = useState<string | null>(null);
+  const [savedPageSuccessId, setSavedPageSuccessId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load saved history on mount
+  useEffect(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('notiq_ai_sessions') : null;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setSessions(parsed.slice(0, 5));
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Save session helper (keeps top 5 preview chats)
+  const saveSession = useCallback((sessionId: string, msgs: AIMessage[]) => {
+    const userFirstMsg = msgs.find(m => m.role === 'user');
+    if (!userFirstMsg) return;
+
+    const titleText = userFirstMsg.content.slice(0, 38) + (userFirstMsg.content.length > 38 ? '…' : '');
+    const lastModelMsg = [...msgs].reverse().find(m => m.role === 'model' && m.id !== 'welcome');
+    const rawPreview = (lastModelMsg?.content || userFirstMsg.content)
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/[#*`_>-]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const previewText = rawPreview.slice(0, 75) + (rawPreview.length > 75 ? '…' : '');
+
+    setSessions(prev => {
+      const existingIdx = prev.findIndex(s => s.id === sessionId);
+      const sessionObj: AIChatSession = {
+        id: sessionId,
+        title: titleText,
+        preview: previewText || 'Conversation notes...',
+        updatedAt: new Date().toISOString(),
+        messages: msgs,
+      };
+
+      let updatedList: AIChatSession[];
+      if (existingIdx >= 0) {
+        updatedList = [...prev];
+        updatedList[existingIdx] = sessionObj;
+        // Move active session to top
+        const [target] = updatedList.splice(existingIdx, 1);
+        updatedList.unshift(target);
+      } else {
+        updatedList = [sessionObj, ...prev];
+      }
+
+      const trimmed = updatedList.slice(0, 5);
+      try {
+        localStorage.setItem('notiq_ai_sessions', JSON.stringify(trimmed));
+      } catch {}
+      return trimmed;
+    });
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -105,8 +191,9 @@ export default function AIAssistant({
 
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
+    saveSession(currentSessionId, newMessages);
+
     if (!textToSend) setInput('');
-    // Reset textarea height after send
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -115,7 +202,6 @@ export default function AIAssistant({
     const aiMsgId = `ai-${Date.now()}`;
     let messageAdded = false;
 
-    // Abort previous request if any
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -134,15 +220,18 @@ export default function AIAssistant({
           if (!messageAdded) {
             messageAdded = true;
             setStreamingMsgId(aiMsgId);
-            setMessages(prev => [
-              ...prev,
-              {
-                id: aiMsgId,
-                role: 'model',
-                content: accumulated,
-                createdAt: new Date().toISOString(),
-              },
-            ]);
+            setMessages(prev => {
+              const updated = [
+                ...prev,
+                {
+                  id: aiMsgId,
+                  role: 'model' as const,
+                  content: accumulated,
+                  createdAt: new Date().toISOString(),
+                },
+              ];
+              return updated;
+            });
           } else {
             setMessages(prev =>
               prev.map(m => m.id === aiMsgId ? { ...m, content: accumulated } : m)
@@ -151,22 +240,33 @@ export default function AIAssistant({
         },
       });
 
+      let finalMessages: AIMessage[];
       if (!messageAdded && fullText) {
-        setMessages(prev => [
-          ...prev,
+        finalMessages = [
+          ...newMessages,
           {
             id: aiMsgId,
             role: 'model',
             content: fullText,
             createdAt: new Date().toISOString(),
           },
-        ]);
+        ];
+        setMessages(finalMessages);
       } else if (messageAdded && fullText) {
+        finalMessages = newMessages.concat({
+          id: aiMsgId,
+          role: 'model',
+          content: fullText,
+          createdAt: new Date().toISOString(),
+        });
         setMessages(prev =>
           prev.map(m => m.id === aiMsgId ? { ...m, content: fullText } : m)
         );
+      } else {
+        finalMessages = newMessages;
       }
 
+      saveSession(currentSessionId, finalMessages);
       if (onResponse) onResponse(fullText);
     } catch (err: any) {
       if (err.name === 'AbortError') return;
@@ -191,7 +291,49 @@ export default function AIAssistant({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const clearHistory = () => {
+  const handleCopyCodeBlock = (key: string, code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCodeKey(key);
+    setTimeout(() => setCopiedCodeKey(null), 2000);
+  };
+
+  const startNewChat = () => {
+    const newId = `session-${Date.now()}`;
+    setCurrentSessionId(newId);
+    setMessages([
+      {
+        id: 'welcome',
+        role: 'model',
+        content: `Hello! 👋 I'm **Notiq AI**.\nHow can I assist you with your workspaces, tasks, notes, or learning today?`,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    setInput('');
+    setError(null);
+    setShowHistoryModal(false);
+  };
+
+  const loadSession = (session: AIChatSession) => {
+    setCurrentSessionId(session.id);
+    setMessages(session.messages);
+    setShowHistoryModal(false);
+  };
+
+  const deleteSession = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSessions(prev => {
+      const filtered = prev.filter(s => s.id !== sessionId);
+      try {
+        localStorage.setItem('notiq_ai_sessions', JSON.stringify(filtered));
+      } catch {}
+      return filtered;
+    });
+    if (currentSessionId === sessionId) {
+      startNewChat();
+    }
+  };
+
+  const clearCurrentChat = () => {
     setMessages([
       {
         id: 'welcome',
@@ -203,7 +345,56 @@ export default function AIAssistant({
     setError(null);
   };
 
-  // Simple Markdown Renderer
+  // 1-Click "Save as Page" from any AI response bubble
+  const handleSaveMessageAsPage = async (msgId: string, content: string) => {
+    setSavingPageMsgId(msgId);
+    try {
+      const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+      const headingLine = lines.find(l => l.startsWith('#') || l.length > 5) || 'AI Generated Note';
+      const cleanTitle = headingLine.replace(/^[#*`_\s-]+/, '').slice(0, 48) || 'AI Learning Note';
+      const targetWsId = context?.workspaceId || activeWorkspace?.id;
+      let newPageId = `page-${Date.now()}`;
+
+      if (targetWsId) {
+        try {
+          const res = await pageApi.create({
+            title: cleanTitle,
+            icon: '📝',
+            content: content,
+            workspaceId: targetWsId,
+          });
+          if (res.data?.page?.id) newPageId = res.data.page.id;
+        } catch (apiErr) {
+          console.warn('API create page failed, saving locally:', apiErr);
+        }
+      }
+
+      try {
+        const raw = localStorage.getItem('notiq_pages');
+        const list = raw ? JSON.parse(raw) : [];
+        const newPageObj = {
+          id: newPageId,
+          title: cleanTitle,
+          icon: '📝',
+          content: content,
+          workspaceId: targetWsId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        list.unshift(newPageObj);
+        localStorage.setItem('notiq_pages', JSON.stringify(list));
+        window.dispatchEvent(new CustomEvent('notiq:page-created', { detail: newPageObj }));
+      } catch {}
+
+      setSavedPageSuccessId(newPageId);
+    } catch (err) {
+      console.error('Failed to save message as page:', err);
+    } finally {
+      setSavingPageMsgId(null);
+    }
+  };
+
+  // Modern Markdown Renderer with strict zero-overflow and rich cards
   const renderMarkdown = (text: string) => {
     const lines = text.split('\n');
     let inCodeBlock = false;
@@ -231,21 +422,92 @@ export default function AIAssistant({
             } catch {
               // ignore malformed task json
             }
+          } else if (codeLang === 'notiq-page') {
+            try {
+              const raw = codeBuffer.join('\n').trim();
+              const pageData = JSON.parse(raw);
+              if (pageData && pageData.title) {
+                elements.push(
+                  <PageConfirmationCard
+                    key={`page-${index}`}
+                    page={pageData}
+                    workspaceId={context?.workspaceId || activeWorkspace?.id}
+                  />
+                );
+              }
+            } catch {
+              // ignore malformed page json
+            }
           } else {
+            const blockCode = codeBuffer.join('\n');
+            const codeKey = `code-${index}`;
             elements.push(
-              <pre key={`code-${index}`} style={{
-                background: 'rgba(0, 0, 0, 0.45)',
-                padding: '10px 12px',
-                borderRadius: 8,
-                fontSize: 12,
-                fontFamily: 'monospace',
-                overflowX: 'auto',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                margin: '6px 0',
-                color: '#38bdf8'
-              }}>
-                <code>{codeBuffer.join('\n')}</code>
-              </pre>
+              <div
+                key={codeKey}
+                style={{
+                  margin: '10px 0',
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  background: 'rgba(10, 10, 15, 0.85)',
+                  maxWidth: '100%',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                }}
+              >
+                {/* Code Header Bar with language tag & Copy Code button */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '5px 12px',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                    fontSize: 11,
+                    color: '#94a3b8',
+                  }}
+                >
+                  <span style={{ fontWeight: 600, textTransform: 'lowercase', letterSpacing: '0.4px' }}>
+                    {codeLang || 'code'}
+                  </span>
+                  <button
+                    onClick={() => handleCopyCodeBlock(codeKey, blockCode)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: copiedCodeKey === codeKey ? '#4ade80' : '#cbd5e1',
+                      cursor: 'pointer',
+                      fontSize: 11,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {copiedCodeKey === codeKey ? <Check size={11} /> : <Copy size={11} />}
+                    <span>{copiedCodeKey === codeKey ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+
+                <pre
+                  style={{
+                    padding: '12px 14px',
+                    margin: 0,
+                    fontSize: 12.5,
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                    overflowX: 'auto',
+                    maxWidth: '100%',
+                    color: '#38bdf8',
+                    lineHeight: 1.5,
+                    whiteSpace: 'pre',
+                  }}
+                >
+                  <code>{blockCode}</code>
+                </pre>
+              </div>
             );
           }
           codeBuffer = [];
@@ -267,27 +529,27 @@ export default function AIAssistant({
       // Headers
       if (line.startsWith('### ')) {
         elements.push(
-          <h4 key={index} style={{ fontSize: 13, fontWeight: 700, margin: '8px 0 4px', color: '#f8fafc' }}>
+          <h4 key={index} style={{ fontSize: 13.5, fontWeight: 700, margin: '8px 0 4px', color: '#f8fafc', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
             {formatInline(line.replace('### ', ''))}
           </h4>
         );
       } else if (line.startsWith('## ')) {
         elements.push(
-          <h3 key={index} style={{ fontSize: 14, fontWeight: 700, margin: '10px 0 4px', color: '#f8fafc' }}>
+          <h3 key={index} style={{ fontSize: 14.5, fontWeight: 700, margin: '10px 0 4px', color: '#f8fafc', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
             {formatInline(line.replace('## ', ''))}
           </h3>
         );
       } else if (line.startsWith('# ')) {
         elements.push(
-          <h2 key={index} style={{ fontSize: 15, fontWeight: 800, margin: '12px 0 6px', color: '#fff' }}>
+          <h2 key={index} style={{ fontSize: 16, fontWeight: 800, margin: '12px 0 6px', color: '#fff', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
             {formatInline(line.replace('# ', ''))}
           </h2>
         );
       } else if (line.startsWith('- ') || line.startsWith('* ')) {
         elements.push(
-          <div key={index} style={{ display: 'flex', gap: 6, margin: '3px 0', alignItems: 'flex-start', paddingLeft: 4 }}>
-            <span style={{ color: 'var(--accent, #6366f1)', fontSize: 12, marginTop: 2 }}>•</span>
-            <div style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
+          <div key={index} style={{ display: 'flex', gap: 6, margin: '3px 0', alignItems: 'flex-start', paddingLeft: 4, minWidth: 0, width: '100%' }}>
+            <span style={{ color: 'var(--accent, #6366f1)', fontSize: 12, marginTop: 2, flexShrink: 0 }}>•</span>
+            <div style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: 1.55, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
               {formatInline(line.substring(2))}
             </div>
           </div>
@@ -295,9 +557,9 @@ export default function AIAssistant({
       } else if (/^\d+\.\s/.test(line)) {
         const num = line.match(/^(\d+)\.\s/)?.[1];
         elements.push(
-          <div key={index} style={{ display: 'flex', gap: 6, margin: '3px 0', alignItems: 'flex-start', paddingLeft: 4 }}>
-            <span style={{ color: 'var(--accent, #6366f1)', fontSize: 12, fontWeight: 700, marginTop: 1 }}>{num}.</span>
-            <div style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
+          <div key={index} style={{ display: 'flex', gap: 6, margin: '3px 0', alignItems: 'flex-start', paddingLeft: 4, minWidth: 0, width: '100%' }}>
+            <span style={{ color: 'var(--accent, #6366f1)', fontSize: 12, fontWeight: 700, marginTop: 1, flexShrink: 0 }}>{num}.</span>
+            <div style={{ flex: 1, minWidth: 0, fontSize: 13, lineHeight: 1.55, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
               {formatInline(line.replace(/^\d+\.\s/, ''))}
             </div>
           </div>
@@ -306,7 +568,7 @@ export default function AIAssistant({
         elements.push(<div key={index} style={{ height: 6 }} />);
       } else {
         elements.push(
-          <p key={index} style={{ margin: '2px 0', fontSize: 13, lineHeight: 1.55 }}>
+          <p key={index} style={{ margin: '2px 0', fontSize: 13, lineHeight: 1.55, wordBreak: 'break-word', overflowWrap: 'anywhere', minWidth: 0 }}>
             {formatInline(line)}
           </p>
         );
@@ -324,6 +586,22 @@ export default function AIAssistant({
               <TaskConfirmationCard
                 key="task-streaming"
                 task={taskData}
+                workspaceId={context?.workspaceId || activeWorkspace?.id}
+              />
+            );
+          }
+        }
+      } catch {}
+    } else if (inCodeBlock && codeLang === 'notiq-page') {
+      try {
+        const raw = codeBuffer.join('\n').trim();
+        if (raw.endsWith('}')) {
+          const pageData = JSON.parse(raw);
+          if (pageData && pageData.title) {
+            elements.push(
+              <PageConfirmationCard
+                key="page-streaming"
+                page={pageData}
                 workspaceId={context?.workspaceId || activeWorkspace?.id}
               />
             );
@@ -425,8 +703,8 @@ export default function AIAssistant({
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <button
-              onClick={clearHistory}
-              title="Clear conversation"
+              onClick={clearCurrentChat}
+              title="Clear current conversation"
               style={{
                 background: 'transparent',
                 border: 'none',
@@ -453,15 +731,239 @@ export default function AIAssistant({
         </div>
       )}
 
-      {/* Messages Feed */}
+      {/* Sub-toolbar: Recent 5 Chats & New Chat Controls */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '7px 14px',
+          background: 'rgba(255, 255, 255, 0.025)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+          fontSize: 12,
+          position: 'relative',
+          zIndex: 10,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {/* History Button (shows last 5 preview chats) */}
+          <button
+            onClick={() => setShowHistoryModal(prev => !prev)}
+            title="View recent preview chats"
+            style={{
+              background: showHistoryModal ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.06)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: '#e2e8f0',
+              padding: '3px 10px',
+              borderRadius: 6,
+              fontSize: 11.5,
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              transition: 'all 0.15s',
+            }}
+          >
+            <Clock size={12} style={{ color: '#818cf8' }} />
+            <span>Recent ({sessions.length})</span>
+          </button>
+
+          {/* New Chat Button */}
+          <button
+            onClick={startNewChat}
+            title="Start fresh conversation"
+            style={{
+              background: 'rgba(255, 255, 255, 0.06)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: '#e2e8f0',
+              padding: '3px 10px',
+              borderRadius: 6,
+              fontSize: 11.5,
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255, 255, 255, 0.12)';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255, 255, 255, 0.06)';
+            }}
+          >
+            <Plus size={12} style={{ color: '#4ade80' }} />
+            <span>New Chat</span>
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            onClick={clearCurrentChat}
+            title="Reset messages"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-muted, #94a3b8)',
+              fontSize: 11,
+              cursor: 'pointer',
+              padding: '2px 6px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <RotateCcw size={11} />
+            <span>Clear</span>
+          </button>
+        </div>
+
+        {/* 📌 Recent 5 Chats Dropdown / Popover */}
+        {showHistoryModal && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '100%',
+              left: 12,
+              marginTop: 4,
+              width: 'min(360px, calc(100vw - 32px))',
+              background: 'linear-gradient(160deg, #1e1b2e 0%, #16161d 100%)',
+              border: '1px solid rgba(139, 92, 246, 0.35)',
+              borderRadius: 12,
+              boxShadow: '0 16px 36px -4px rgba(0, 0, 0, 0.7), 0 0 20px rgba(99, 102, 241, 0.2)',
+              zIndex: 99,
+              padding: '10px 12px',
+              backdropFilter: 'blur(16px)',
+              animation: 'fadeIn 0.15s ease-out',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Clock size={13} style={{ color: '#a78bfa' }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>Recent Chats (5 Max)</span>
+              </div>
+              <button
+                onClick={() => setShowHistoryModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <X size={13} />
+              </button>
+            </div>
+
+            {sessions.length === 0 ? (
+              <div style={{ padding: '16px 8px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                No recent conversations yet. Ask Notiq AI anything to start saving history!
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+                {sessions.map(s => {
+                  const isActive = s.id === currentSessionId;
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => loadSession(s)}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        background: isActive ? 'rgba(99, 102, 241, 0.18)' : 'rgba(255, 255, 255, 0.04)',
+                        border: isActive ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid rgba(255, 255, 255, 0.06)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 2,
+                      }}
+                      onMouseEnter={e => {
+                        if (!isActive) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255, 255, 255, 0.08)';
+                      }}
+                      onMouseLeave={e => {
+                        if (!isActive) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255, 255, 255, 0.04)';
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: isActive ? '#c7d2fe' : '#f8fafc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                          {s.title}
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted, #94a3b8)' }}>
+                            {formatTimeAgo(s.updatedAt)}
+                          </span>
+                          <button
+                            onClick={e => deleteSession(s.id, e)}
+                            title="Remove chat"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                              padding: 2,
+                              display: 'flex',
+                              alignItems: 'center',
+                            }}
+                            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#f87171'; }}
+                            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; }}
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: 11, color: 'var(--text-muted, #94a3b8)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {s.preview}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid rgba(255, 255, 255, 0.06)', display: 'flex', justifyContent: 'center' }}>
+              <button
+                onClick={startNewChat}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#a5b4fc',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 8px',
+                }}
+              >
+                <Plus size={12} />
+                <span>Start Fresh Chat</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Messages Feed — STRICT ZERO-HORIZONTAL SCROLL */}
       <div
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '16px',
+          overflowX: 'hidden',
+          padding: '14px 16px',
           display: 'flex',
           flexDirection: 'column',
           gap: 14,
+          minWidth: 0,
+          width: '100%',
+          boxSizing: 'border-box',
         }}
       >
         {messages.map(msg => {
@@ -475,14 +977,20 @@ export default function AIAssistant({
                 flexDirection: 'column',
                 alignItems: isUser ? 'flex-end' : 'flex-start',
                 width: '100%',
+                minWidth: 0,
+                boxSizing: 'border-box',
               }}
             >
               <div
                 style={{
                   display: 'flex',
-                  gap: 8,
-                  maxWidth: '92%',
+                  gap: 10,
+                  width: '100%',
+                  maxWidth: isUser ? '85%' : '100%',
                   flexDirection: isUser ? 'row-reverse' : 'row',
+                  alignItems: 'flex-start',
+                  minWidth: 0,
+                  boxSizing: 'border-box',
                 }}
               >
                 {/* Avatar */}
@@ -490,7 +998,7 @@ export default function AIAssistant({
                   style={{
                     width: 26,
                     height: 26,
-                    borderRadius: 6,
+                    borderRadius: 7,
                     background: isUser ? 'var(--accent, #6366f1)' : 'rgba(255, 255, 255, 0.08)',
                     display: 'flex',
                     alignItems: 'center',
@@ -498,30 +1006,36 @@ export default function AIAssistant({
                     color: '#fff',
                     flexShrink: 0,
                     marginTop: 2,
+                    boxShadow: isUser ? '0 2px 6px rgba(99, 102, 241, 0.4)' : 'none',
                   }}
                 >
                   {isUser ? <User size={14} /> : <Bot size={14} />}
                 </div>
 
-                {/* Bubble */}
+                {/* Bubble with strict wrapping & no overflow clipping */}
                 <div
                   style={{
-                    background: isUser ? 'var(--accent, #6366f1)' : 'rgba(255, 255, 255, 0.05)',
+                    background: isUser ? 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)' : 'rgba(255, 255, 255, 0.04)',
                     color: isUser ? '#fff' : 'var(--text-primary, #e2e8f0)',
-                    padding: '10px 14px',
-                    borderRadius: 12,
-                    borderTopRightRadius: isUser ? 2 : 12,
-                    borderTopLeftRadius: isUser ? 12 : 2,
-                    border: isUser ? 'none' : '1px solid rgba(255, 255, 255, 0.07)',
+                    padding: '12px 16px',
+                    borderRadius: 14,
+                    borderTopRightRadius: isUser ? 2 : 14,
+                    borderTopLeftRadius: isUser ? 14 : 2,
+                    border: isUser ? 'none' : '1px solid rgba(255, 255, 255, 0.08)',
                     wordBreak: 'break-word',
+                    overflowWrap: 'anywhere',
+                    flex: 1,
+                    minWidth: 0,
+                    maxWidth: '100%',
+                    boxSizing: 'border-box',
                   }}
                 >
                   {isUser ? (
-                    <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                    <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                       {msg.content}
                     </div>
                   ) : (
-                    <div>{renderMarkdown(msg.content)}</div>
+                    <div style={{ minWidth: 0, width: '100%' }}>{renderMarkdown(msg.content)}</div>
                   )}
 
                   {/* Actions for AI responses */}
@@ -531,29 +1045,77 @@ export default function AIAssistant({
                         display: 'flex',
                         alignItems: 'center',
                         gap: 8,
-                        marginTop: 8,
-                        paddingTop: 6,
+                        marginTop: 10,
+                        paddingTop: 8,
                         borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                        flexWrap: 'wrap',
                       }}
                     >
                       <button
                         onClick={() => handleCopy(msg.id, msg.content)}
                         style={{
-                          background: 'none',
-                          border: 'none',
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
                           color: copiedId === msg.id ? '#4ade80' : 'var(--text-muted, #94a3b8)',
                           fontSize: 11,
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
                           gap: 4,
-                          padding: '2px 6px',
-                          borderRadius: 4,
+                          padding: '3px 8px',
+                          borderRadius: 5,
+                          transition: 'all 0.15s',
                         }}
                       >
                         {copiedId === msg.id ? <Check size={12} /> : <Copy size={12} />}
-                        {copiedId === msg.id ? 'Copied' : 'Copy'}
+                        <span>{copiedId === msg.id ? 'Copied' : 'Copy'}</span>
                       </button>
+
+                      {/* 1-Click Save as Workspace Page */}
+                      <button
+                        onClick={() => handleSaveMessageAsPage(msg.id, msg.content)}
+                        disabled={savingPageMsgId === msg.id}
+                        title="Create a new workspace Page from this response"
+                        style={{
+                          background: 'rgba(56, 189, 248, 0.12)',
+                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                          color: '#7dd3fc',
+                          fontSize: 11,
+                          cursor: savingPageMsgId === msg.id ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '3px 9px',
+                          borderRadius: 5,
+                          fontWeight: 500,
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <FileText size={12} />
+                        <span>{savingPageMsgId === msg.id ? 'Creating Page…' : '📄 Save as Page'}</span>
+                      </button>
+
+                      {savedPageSuccessId && (
+                        <button
+                          onClick={() => router.push(`/workspace/pages/${savedPageSuccessId}`)}
+                          style={{
+                            background: 'rgba(34, 197, 94, 0.15)',
+                            border: '1px solid rgba(34, 197, 94, 0.3)',
+                            color: '#4ade80',
+                            fontSize: 11,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '3px 8px',
+                            borderRadius: 5,
+                            fontWeight: 600,
+                          }}
+                        >
+                          <CheckCircle2 size={12} />
+                          <span>View Saved Page →</span>
+                        </button>
+                      )}
 
                       {onInsert && (
                         <button
@@ -568,12 +1130,12 @@ export default function AIAssistant({
                             display: 'flex',
                             alignItems: 'center',
                             gap: 4,
-                            padding: '2px 8px',
-                            borderRadius: 4,
+                            padding: '3px 8px',
+                            borderRadius: 5,
                           }}
                         >
                           <ExternalLink size={11} />
-                          Insert into Note
+                          <span>Insert into Note</span>
                         </button>
                       )}
                     </div>
@@ -1240,3 +1802,191 @@ function TaskConfirmationCard({
     </div>
   );
 }
+
+// 📄 Interactive 1-Click Page Confirmation Card
+interface PageData {
+  title: string;
+  icon?: string;
+  content: string;
+}
+
+function PageConfirmationCard({
+  page,
+  workspaceId,
+}: {
+  page: PageData;
+  workspaceId?: string;
+}) {
+  const [isCreating, setIsCreating] = useState(false);
+  const [createdPageId, setCreatedPageId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  const handleCreate = async () => {
+    if (!page.title) return;
+    setIsCreating(true);
+    setError(null);
+
+    try {
+      let newPageId = `page-${Date.now()}`;
+      if (workspaceId) {
+        try {
+          const res = await pageApi.create({
+            workspaceId,
+            title: page.title,
+            icon: page.icon || '⚡',
+            content: page.content || `# ${page.title}\n\nDocument notes...`,
+          });
+          if (res.data?.page?.id) {
+            newPageId = res.data.page.id;
+          }
+        } catch (apiErr) {
+          console.warn('API create page failed, using local storage fallback:', apiErr);
+        }
+      }
+
+      // Sync to localStorage
+      try {
+        const raw = typeof window !== 'undefined' ? localStorage.getItem('notiq_pages') : null;
+        const list = raw ? JSON.parse(raw) : [];
+        const newPageObj = {
+          id: newPageId,
+          title: page.title,
+          icon: page.icon || '⚡',
+          content: page.content || `# ${page.title}\n\nDocument notes...`,
+          workspaceId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        list.unshift(newPageObj);
+        localStorage.setItem('notiq_pages', JSON.stringify(list));
+        window.dispatchEvent(new CustomEvent('notiq:page-created', { detail: newPageObj }));
+      } catch (storageErr) {
+        console.error('Failed to update local storage for page:', storageErr);
+      }
+
+      setCreatedPageId(newPageId);
+    } catch (err: any) {
+      console.error('Failed to create page:', err);
+      setError(err?.message || 'Failed to create page');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const previewSnippet = (page.content || '')
+    .replace(/^[#*`_\s-]+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        marginBottom: 8,
+        padding: '14px 16px',
+        borderRadius: 12,
+        background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.08) 0%, rgba(99, 102, 241, 0.08) 100%)',
+        border: '1px solid rgba(14, 165, 233, 0.3)',
+        boxShadow: '0 4px 16px -2px rgba(0, 0, 0, 0.35)',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 16 }}>{page.icon || '⚡'}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#38bdf8' }}>
+            Ready to Create Page
+          </span>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 6, wordBreak: 'break-word' }}>
+        {page.title}
+      </div>
+
+      {previewSnippet && (
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--text-muted, #94a3b8)',
+            marginBottom: 12,
+            lineHeight: 1.5,
+            background: 'rgba(0, 0, 0, 0.25)',
+            padding: '8px 10px',
+            borderRadius: 6,
+            border: '1px solid rgba(255, 255, 255, 0.05)',
+            maxHeight: 70,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {previewSnippet}…
+        </div>
+      )}
+
+      {error && (
+        <div style={{ fontSize: 11, color: '#f87171', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+          <AlertCircle size={12} />
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+        {createdPageId ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4ade80', fontSize: 12, fontWeight: 600 }}>
+              <CheckCircle2 size={14} /> Page Added to Workspace!
+            </span>
+            <button
+              onClick={() => router.push(`/workspace/pages/${createdPageId}`)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '6px 14px',
+                borderRadius: 8,
+                background: 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)',
+                color: '#fff',
+                border: 'none',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(2, 132, 199, 0.35)',
+              }}
+            >
+              Open Page <ChevronRight size={13} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={handleCreate}
+            disabled={isCreating}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 16px',
+              borderRadius: 8,
+              background: 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)',
+              color: '#fff',
+              border: 'none',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: isCreating ? 'not-allowed' : 'pointer',
+              opacity: isCreating ? 0.7 : 1,
+              boxShadow: '0 2px 10px rgba(2, 132, 199, 0.35)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <FileText size={13} />
+            {isCreating ? 'Creating Page…' : '📄 Create Page in Workspace'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
