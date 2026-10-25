@@ -27,6 +27,8 @@ export interface BrototypeTaskTopic {
   resources: any[];
 }
 
+
+
 export interface BrototypeTask {
   taskAssignmentId: number;
   taskAssignmentIdentifier: string;
