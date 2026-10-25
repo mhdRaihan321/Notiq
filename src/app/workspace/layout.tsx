@@ -1,0 +1,40 @@
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
+import Sidebar from '@/components/Sidebar';
+import ChatBot from '@/components/ChatBot';
+
+export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.replace('/login');
+    }
+  }, [user, isLoading, router]);
+
+  const showContent = !isLoading && !!user;
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg-primary)', overflow: 'hidden', position: 'relative' }}>
+      {showContent && <Sidebar />}
+      <main style={{ flex: 1, overflow: 'auto', background: 'var(--bg-primary)', visibility: showContent ? 'visible' : 'hidden' }}>
+        {children}
+      </main>
+      {showContent && <ChatBot />}
+      {!showContent && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary)' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid var(--border)', borderTopColor: 'var(--accent)', margin: '0 auto 12px', animation: 'spin 0.8s linear infinite' }} />
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
