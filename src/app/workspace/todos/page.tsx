@@ -13,7 +13,8 @@ import {
   SubItem,
 } from '@/lib/brototypeApi';
 import BrototypeModal from '@/components/BrototypeModal';
-import { generateLearningNotesForTask } from '@/lib/aiService';
+import { generateLearningNotesForTask, generateQuizForTopic, QuizQuestion } from '@/lib/aiService';
+import TaskQuizModal from '@/components/TaskQuizModal';
 import TaskDetailSideMenu, { getTaskIcon } from '@/components/TaskDetailSideMenu';
 
 export interface Todo {
@@ -28,6 +29,8 @@ export interface Todo {
   tags: string[];
   sortOrder?: number;
   subItems?: SubItem[];
+  questions?: QuizQuestion[];
+  quizScore?: number;
   pageId?: string;
   learningNotes?: string;
   estimatedTime?: string;
@@ -115,10 +118,28 @@ function TodosPageInner() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const selectedTodo = todos.find((t) => t.id === selectedTaskId) || null;
 
+  // 🎯 Task Completion Mastery Quiz state (10 questions, 7/10 pass requirement)
+  const [quizModalTodo, setQuizModalTodo] = useState<Todo | null>(null);
+  const [showQuizModal, setShowQuizModal] = useState(false);
+
+  // 📱 Mobile responsive state
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileColumn, setMobileColumn] = useState<'todo' | 'in_progress' | 'done'>('todo');
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Keyboard shortcut listener for Modals & Side Menu (Escape to cancel/close)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (showQuizModal) setShowQuizModal(false);
         if (deleteConfirmTodo && !deleting) setDeleteConfirmTodo(null);
         if (showDeleteAllModal && !deletingAll) {
           setShowDeleteAllModal(false);
@@ -131,7 +152,7 @@ function TodosPageInner() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [deleteConfirmTodo, deleting, showDeleteAllModal, deletingAll, selectedTaskId]);
+  }, [deleteConfirmTodo, deleting, showDeleteAllModal, deletingAll, selectedTaskId, showQuizModal]);
 
   // Form state
   const [form, setForm] = useState({
@@ -157,19 +178,25 @@ function TodosPageInner() {
         if (data?.todos && Array.isArray(data.todos) && data.todos.length > 0) {
           const localCache = localStorage.getItem('notiq_todos');
           const cacheMap = new Map<string, Todo>();
+          const titleMap = new Map<string, Todo>();
           if (localCache) {
             try {
               const parsed: Todo[] = JSON.parse(localCache);
-              parsed.forEach((t) => cacheMap.set(t.id, t));
+              parsed.forEach((t) => {
+                cacheMap.set(t.id, t);
+                if (t.title) titleMap.set(t.title.trim().toLowerCase(), t);
+              });
             } catch { /* */ }
           }
 
           const enriched: Todo[] = data.todos.map((t: any) => {
-            const cached = cacheMap.get(t.id);
+            const cached = cacheMap.get(t.id) || titleMap.get((t.title || '').trim().toLowerCase());
             return {
               ...t,
               topicHeading: t.topicHeading || cached?.topicHeading,
-              subItems: t.subItems || cached?.subItems || parseTopicSubItems(t.description || ''),
+              subItems: (t.subItems && t.subItems.length > 0) ? t.subItems : (cached?.subItems && cached.subItems.length > 0 ? cached.subItems : parseTopicSubItems(t.description || '', t.title)),
+              questions: (t.questions && t.questions.length > 0) ? t.questions : cached?.questions || [],
+              quizScore: t.quizScore ?? cached?.quizScore,
               sortOrder: t.sortOrder ?? cached?.sortOrder ?? 0,
               assignedAt: t.assignedAt || cached?.assignedAt,
             };
@@ -308,12 +335,22 @@ function TodosPageInner() {
 
   const handleToggleSubItem = (todoId: string, subItemId: string) => {
     setTodos((prev) => {
+      let triggeredDoneTodo: Todo | null = null;
       const updated: Todo[] = prev.map((t): Todo => {
         if (t.id !== todoId || !t.subItems) return t;
         const newSubs = t.subItems.map((s) => (s.id === subItemId ? { ...s, completed: !s.completed } : s));
         const allCompleted = newSubs.length > 0 && newSubs.every((s) => s.completed);
 
-        const nextStatus: Todo['status'] = allCompleted ? 'done' : t.status === 'done' ? 'in_progress' : t.status;
+        if (allCompleted && t.status !== 'done') {
+          triggeredDoneTodo = { ...t, subItems: newSubs };
+          // Don't auto-set to done until quiz is passed
+          return {
+            ...t,
+            subItems: newSubs,
+          };
+        }
+
+        const nextStatus: Todo['status'] = t.status === 'done' && !allCompleted ? 'in_progress' : t.status;
         if (nextStatus !== t.status) {
           todoApi.update(t.id, { status: nextStatus }).catch(() => {});
         }
@@ -325,6 +362,12 @@ function TodosPageInner() {
         };
       });
       saveTodosToStorage(updated);
+
+      if (triggeredDoneTodo) {
+        setQuizModalTodo(triggeredDoneTodo);
+        setShowQuizModal(true);
+      }
+
       return updated;
     });
   };
@@ -344,6 +387,13 @@ function TodosPageInner() {
 
   const handleStatusToggle = async (todo: Todo) => {
     const next: Todo['status'] = todo.status === 'done' ? 'todo' : todo.status === 'todo' ? 'in_progress' : 'done';
+    if (next === 'done') {
+      // Must pass 10-question quiz to complete
+      setQuizModalTodo(todo);
+      setShowQuizModal(true);
+      return;
+    }
+
     try {
       await todoApi.update(todo.id, { status: next }).catch(() => {});
     } catch { /* */ }
@@ -356,12 +406,53 @@ function TodosPageInner() {
 
   // Direct status update (from Side Menu status dropdown)
   const handleUpdateTaskStatus = async (todoId: string, newStatus: Todo['status']) => {
+    const target = todos.find((t) => t.id === todoId);
+    if (newStatus === 'done' && target && target.status !== 'done') {
+      // Must pass 10-question quiz to complete
+      setQuizModalTodo(target);
+      setShowQuizModal(true);
+      return;
+    }
+
     try {
       await todoApi.update(todoId, { status: newStatus }).catch(() => {});
     } catch { /* */ }
     setTodos((prev) => {
       const updated: Todo[] = prev.map((t) => (t.id === todoId ? { ...t, status: newStatus } : t));
       saveTodosToStorage(updated);
+      return updated;
+    });
+  };
+
+  // Called when student passes quiz with >= 7/10
+  const handleQuizPassed = (score: number) => {
+    if (!quizModalTodo) return;
+    const targetId = quizModalTodo.id;
+    setTodos((prev) => {
+      const updated: Todo[] = prev.map((t) => {
+        if (t.id !== targetId) return t;
+        // Also mark all sub-items as completed
+        const subItems = t.subItems ? t.subItems.map((s) => ({ ...s, completed: true })) : [];
+        return {
+          ...t,
+          status: 'done',
+          quizScore: score,
+          subItems: subItems.length > 0 ? subItems : t.subItems,
+        };
+      });
+      saveTodosToStorage(updated);
+      todoApi.update(targetId, { status: 'done', quizScore: score }).catch(() => {});
+      return updated;
+    });
+    setQuizModalTodo(null);
+    setShowQuizModal(false);
+  };
+
+  const handleUpdateTaskQuestions = (taskId: string, qs: QuizQuestion[]) => {
+    setTodos((prev) => {
+      const updated = prev.map((t) => (t.id === taskId ? { ...t, questions: qs } : t));
+      saveTodosToStorage(updated);
+      todoApi.update(taskId, { questions: qs }).catch(() => {});
       return updated;
     });
   };
@@ -520,10 +611,16 @@ function TodosPageInner() {
     if (!id) return;
     setDraggedTodoId(null);
 
-    setTodos((prev) => {
-      const movingTodo = prev.find((t) => t.id === id);
-      if (!movingTodo || movingTodo.status === targetStatus) return prev;
+    const movingTodo = todos.find((t) => t.id === id);
+    if (!movingTodo || movingTodo.status === targetStatus) return;
 
+    if (targetStatus === 'done') {
+      setQuizModalTodo(movingTodo);
+      setShowQuizModal(true);
+      return;
+    }
+
+    setTodos((prev) => {
       const updated = prev.map((t) => (t.id === id ? { ...t, status: targetStatus } : t));
       saveTodosToStorage(updated);
       todoApi.update(id, { status: targetStatus }).catch(() => {});
@@ -538,6 +635,13 @@ function TodosPageInner() {
     const id = e.dataTransfer.getData('text/plain') || draggedTodoId;
     if (!id || id === targetCardId) return;
     setDraggedTodoId(null);
+
+    const movingTodo = todos.find((t) => t.id === id);
+    if (targetStatus === 'done' && movingTodo && movingTodo.status !== 'done') {
+      setQuizModalTodo(movingTodo);
+      setShowQuizModal(true);
+      return;
+    }
 
     setTodos((prev) => {
       const copy = [...prev];
@@ -605,8 +709,14 @@ function TodosPageInner() {
               .join('\n')
           : '';
 
+      const quizInfo =
+        learningModalTodo.quizScore !== undefined
+          ? `\n> 🎯 **Mastery Quiz Score:** ${learningModalTodo.quizScore}/10 (${learningModalTodo.quizScore >= 7 ? 'PASSED ✅' : 'Review Needed ⚠️'})\n`
+          : '';
+
       const initialContent = `# 🧠 Learnings: ${learningModalTodo.title}
 ${learningModalTodo.topicHeading ? `**Module / Topic:** ${learningModalTodo.topicHeading}\n` : ''}
+${quizInfo}
 ---
 
 ## 📌 Summary & Core Concepts
@@ -614,21 +724,44 @@ ${learningNotesDraft || 'Document what you understood and mastered in this topic
 ${checklistMd}
 
 ## 💡 Key Takeaways & Best Practices
-- Takeaway 1...
-- Takeaway 2...
+- Core Takeaway 1...
+- Core Takeaway 2...
 
 ## ❓ Questions & Future Review
-- Doubts or key points to review before evaluation:
+- Key points to review before technical evaluation:
 `;
 
-      const { data } = await pageApi.create({
-        title: pageTitle,
-        workspaceId: activeWorkspace.id,
-        icon: '🧠',
-        content: initialContent,
-      });
+      let newPageId = `page-learning-${Date.now()}`;
+      try {
+        const { data } = await pageApi.create({
+          title: pageTitle,
+          workspaceId: activeWorkspace.id,
+          icon: '🧠',
+          content: initialContent,
+        });
+        if (data?.page?.id) {
+          newPageId = data.page.id;
+        }
+      } catch (apiErr) {
+        console.warn('API page creation failed, falling back to local storage', apiErr);
+      }
 
-      const newPageId = data.page.id;
+      // Always save to localStorage immediately so pages/[id] loads with 0 lag
+      try {
+        const raw = localStorage.getItem('notiq_pages');
+        const list = raw ? JSON.parse(raw) : [];
+        list.unshift({
+          id: newPageId,
+          title: pageTitle,
+          content: initialContent,
+          icon: '🧠',
+          workspaceId: activeWorkspace.id,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        localStorage.setItem('notiq_pages', JSON.stringify(list));
+        window.dispatchEvent(new CustomEvent('notiq:page-created'));
+      } catch {}
 
       const updated = todos.map((t) =>
         t.id === learningModalTodo.id
@@ -845,7 +978,18 @@ ${checklistMd}
   };
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: selectedTaskId ? '100%' : 1440, margin: '0 auto', overflowX: 'hidden', width: '100%' }} className="fade-in">
+    <div
+      suppressHydrationWarning
+      style={{
+        padding: isMobile ? '16px 12px' : '28px 32px',
+        maxWidth: selectedTaskId ? '100%' : 1440,
+        margin: '0 auto',
+        overflowX: 'hidden',
+        width: '100%',
+        boxSizing: 'border-box',
+      }}
+      className="fade-in"
+    >
       <style>{`
         @keyframes pulseAura {
           0%, 100% { transform: scale(1); opacity: 0.3; }
@@ -1158,21 +1302,80 @@ ${checklistMd}
               <div
                 style={{
                   width: '100%',
-                  overflowX: 'auto',
+                  overflowX: isMobile ? 'visible' : 'auto',
                   WebkitOverflowScrolling: 'touch',
                   paddingBottom: 16,
                 }}
               >
+                {/* Mobile Column Switcher Tabs - Icon Only */}
+                {isMobile && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 6,
+                      marginBottom: 14,
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      padding: 4,
+                      borderRadius: 12,
+                      border: '1px solid rgba(255, 255, 255, 0.06)',
+                    }}
+                  >
+                    {COLUMNS.map((col) => {
+                      const count = todos.filter((t) => t.status === col.id).length;
+                      const isActive = mobileColumn === col.id;
+                      return (
+                        <button
+                          key={col.id}
+                          onClick={() => setMobileColumn(col.id)}
+                          aria-label={col.title}
+                          title={col.title}
+                          style={{
+                            flex: 1,
+                            padding: '9px 12px',
+                            borderRadius: 9,
+                            border: isActive ? `1px solid ${col.accentColor}40` : '1px solid transparent',
+                            background: isActive ? `${col.accentColor}25` : 'transparent',
+                            color: isActive ? col.accentColor : '#a1a1aa',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 8,
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <span style={{ fontSize: 18, lineHeight: 1 }}>{col.icon}</span>
+                          <span
+                            style={{
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              padding: '2px 7px',
+                              borderRadius: 99,
+                              background: isActive ? `${col.accentColor}35` : 'rgba(255, 255, 255, 0.08)',
+                              color: isActive ? '#ffffff' : '#94a3b8',
+                              lineHeight: 1.2,
+                            }}
+                          >
+                            {count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: selectedTaskId ? 'repeat(3, minmax(260px, 1fr))' : 'repeat(3, minmax(280px, 1fr))',
+                    gridTemplateColumns: isMobile
+                      ? '1fr'
+                      : (selectedTaskId ? 'repeat(3, minmax(260px, 1fr))' : 'repeat(3, minmax(280px, 1fr))'),
                     gap: 16,
                     alignItems: 'start',
-                    minWidth: 820,
+                    minWidth: isMobile ? '100%' : 820,
                   }}
                 >
-                  {COLUMNS.map((col) => {
+                  {COLUMNS.filter((col) => !isMobile || col.id === mobileColumn).map((col) => {
                     const colTodos = todos.filter((t) => t.status === col.id);
                     const isTarget = dragOverCol === col.id;
 
@@ -1296,28 +1499,48 @@ ${checklistMd}
           {/* Right: Notion-style Side Menu Detailed View */}
           {selectedTodo && (
             <div
-              style={{
-                width: 'min(500px, 44vw)',
-                flexShrink: 0,
-                position: 'sticky',
-                top: 20,
-                maxHeight: 'calc(100vh - 40px)',
-                zIndex: 40,
-              }}
+              style={
+                isMobile
+                  ? {
+                      position: 'fixed',
+                      inset: 0,
+                      zIndex: 9999,
+                      background: 'rgba(0, 0, 0, 0.78)',
+                      backdropFilter: 'blur(6px)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '12px',
+                    }
+                  : {
+                      width: 'min(500px, 44vw)',
+                      flexShrink: 0,
+                      position: 'sticky',
+                      top: 20,
+                      maxHeight: 'calc(100vh - 40px)',
+                      zIndex: 40,
+                    }
+              }
+              onClick={isMobile ? () => setSelectedTaskId(null) : undefined}
             >
-              <TaskDetailSideMenu
-                todo={selectedTodo}
-                onClose={() => setSelectedTaskId(null)}
-                onToggleStatus={(newStatus) => handleUpdateTaskStatus(selectedTodo.id, newStatus)}
-                onToggleSubItem={(subId) => handleToggleSubItem(selectedTodo.id, subId)}
-                onChangePriority={(p) => handleChangePriority(selectedTodo.id, p)}
-                onChangeDueDate={(date) => handleUpdateTaskDueDate(selectedTodo.id, date)}
-                onAddSubItem={(text) => handleAddSubItemToTask(selectedTodo.id, text)}
-                onAddComment={(text) => handleAddComment(selectedTodo.id, text)}
-                onEdit={() => handleEdit(selectedTodo)}
-                onDelete={() => promptDelete(selectedTodo)}
-                onOpenLearnings={() => openLearningsModal(selectedTodo)}
-              />
+              <div
+                style={isMobile ? { width: '100%', maxWidth: 540, height: '90vh' } : { height: '100%', width: '100%' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <TaskDetailSideMenu
+                  todo={selectedTodo}
+                  onClose={() => setSelectedTaskId(null)}
+                  onToggleStatus={(newStatus) => handleUpdateTaskStatus(selectedTodo.id, newStatus)}
+                  onToggleSubItem={(subId) => handleToggleSubItem(selectedTodo.id, subId)}
+                  onChangePriority={(p) => handleChangePriority(selectedTodo.id, p)}
+                  onChangeDueDate={(date) => handleUpdateTaskDueDate(selectedTodo.id, date)}
+                  onAddSubItem={(text) => handleAddSubItemToTask(selectedTodo.id, text)}
+                  onAddComment={(text) => handleAddComment(selectedTodo.id, text)}
+                  onEdit={() => handleEdit(selectedTodo)}
+                  onDelete={() => promptDelete(selectedTodo)}
+                  onOpenLearnings={() => openLearningsModal(selectedTodo)}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -1826,6 +2049,18 @@ d. Observing incorrect outputs`}
               </div>
             </div>
           )}
+
+          {/* 🎯 Task Completion Mastery Quiz Modal (10 questions, 7/10 pass requirement) */}
+          <TaskQuizModal
+            isOpen={showQuizModal}
+            todo={quizModalTodo}
+            onClose={() => {
+              setShowQuizModal(false);
+              setQuizModalTodo(null);
+            }}
+            onPass={handleQuizPassed}
+            onUpdateQuestions={handleUpdateTaskQuestions}
+          />
         </>,
         document.body
       )}
@@ -2239,6 +2474,24 @@ function TaskCard({
           <span />
         )}
 
+        {todo.quizScore !== undefined && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              padding: '2px 6px',
+              borderRadius: 5,
+              background: 'rgba(16, 185, 129, 0.15)',
+              color: '#34d399',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              letterSpacing: '0.2px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            🎯 {todo.quizScore}/10 Passed
+          </span>
+        )}
+
         {/* Priority Badge with Click-to-Customize Menu */}
         <div style={{ position: 'relative' }}>
           <button
@@ -2498,12 +2751,12 @@ function TaskCard({
                   {sub.prefix}
                 </span>
 
-                {/* Sub-item Content Text */}
+                {/* Sub-item Content Text (Bolder & Crisp White) */}
                 <span
                   style={{
-                    fontSize: 13,
-                    fontWeight: 650,
-                    lineHeight: 1.48,
+                    fontSize: 13.5,
+                    fontWeight: 750,
+                    lineHeight: 1.5,
                     color: sub.completed ? 'rgba(255, 255, 255, 0.45)' : '#ffffff',
                     textDecorationLine: sub.completed ? 'line-through' : 'none',
                     textDecorationColor: 'rgba(52, 211, 153, 0.7)',

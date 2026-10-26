@@ -265,3 +265,175 @@ Keep it structured, clean, and inspiring!`;
   const response = await queryAI({ prompt });
   return response.text;
 }
+
+export interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number; // 0, 1, 2, or 3
+  explanation: string;
+  subtopic?: string;
+}
+
+export interface WrongQuestionDetail {
+  question: string;
+  userAnswer: string;
+  correctAnswer: string;
+  explanation: string;
+  subtopic?: string;
+}
+
+/**
+ * Generate 10 multiple choice questions to test understanding of a topic and its subtopics
+ */
+export async function generateQuizForTopic(
+  title: string,
+  subtopics: string[] | string = []
+): Promise<QuizQuestion[]> {
+  const subsList = Array.isArray(subtopics)
+    ? subtopics.join('\n- ')
+    : subtopics;
+
+  const prompt = `You are a senior technical interviewer and teacher.
+Generate exactly 10 comprehensive multiple-choice questions (MCQs) to evaluate a student on this topic:
+Topic: "${title}"
+Subtopics & Checklist Items:
+- ${subsList || 'General core concepts of ' + title}
+
+Requirements:
+1. Provide exactly 10 questions covering both theoretical understanding, code/syntax quirks, and real-world scenarios.
+2. Each question MUST have exactly 4 options.
+3. "correctAnswer" MUST be the 0-based integer index (0, 1, 2, or 3) of the correct choice.
+4. "explanation" MUST clearly explain why the correct option is right and the key takeaway.
+5. "subtopic" MUST be the relevant subtopic or concept name tested.
+
+Return ONLY a valid JSON array in this exact format:
+[
+  {
+    "id": "q1",
+    "question": "What happens when ...?",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctAnswer": 0,
+    "explanation": "Because...",
+    "subtopic": "..."
+  }
+]`;
+
+  try {
+    const res = await queryAI({ prompt });
+    const text = res.text.trim();
+    
+    // Extract JSON array
+    const jsonMatch = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const validated: QuizQuestion[] = parsed.map((item, idx) => ({
+          id: item.id || `q-${idx + 1}`,
+          question: String(item.question || `Question ${idx + 1} on ${title}`),
+          options: Array.isArray(item.options) && item.options.length === 4
+            ? item.options.map(String)
+            : ['Option A', 'Option B', 'Option C', 'Option D'],
+          correctAnswer: typeof item.correctAnswer === 'number' && item.correctAnswer >= 0 && item.correctAnswer <= 3
+            ? item.correctAnswer
+            : 0,
+          explanation: String(item.explanation || 'Review the topic concepts to understand this.'),
+          subtopic: item.subtopic ? String(item.subtopic) : title,
+        }));
+
+        if (validated.length >= 10) {
+          return validated.slice(0, 10);
+        }
+        // If between 1 and 9, pad with fallback questions to reach 10
+        return padQuizQuestions(validated, title, subtopics);
+      }
+    }
+  } catch (err) {
+    console.warn('AI Quiz generation failed, generating fallback quiz:', err);
+  }
+
+  return padQuizQuestions([], title, subtopics);
+}
+
+function padQuizQuestions(
+  existing: QuizQuestion[],
+  title: string,
+  subtopics: string[] | string
+): QuizQuestion[] {
+  const subs = Array.isArray(subtopics)
+    ? subtopics.filter(Boolean)
+    : String(subtopics).split('\n').map(s => s.replace(/^[-*•\d.)\s]+/, '').trim()).filter(Boolean);
+
+  const needed = 10 - existing.length;
+  const generated: QuizQuestion[] = [...existing];
+
+  const genericConcepts = subs.length > 0 ? subs : [
+    'Core Fundamentals',
+    'Syntax & Execution Behavior',
+    'Best Practices',
+    'Common Pitfalls & Edge Cases',
+    'Practical Application',
+    'Performance & Optimization',
+    'Debugging & Troubleshooting',
+    'Integration & Patterns',
+    'Limitations & Gotchas',
+    'Standard Conventions',
+  ];
+
+  for (let i = 0; i < needed; i++) {
+    const concept = genericConcepts[i % genericConcepts.length] || `Concept ${i + 1}`;
+    generated.push({
+      id: `fallback-q-${existing.length + i + 1}`,
+      question: `In the context of ${title}, which statement best describes ${concept}?`,
+      options: [
+        `It is a fundamental principle in ${title} that should be understood thoroughly.`,
+        `It is deprecated and should never be used in modern development.`,
+        `It only works in browser environments and not in server runtimes.`,
+        `It causes a runtime syntax error in all modern versions.`,
+      ],
+      correctAnswer: 0,
+      explanation: `${concept} is a core aspect of ${title} and essential for writing clean, reliable code.`,
+      subtopic: concept,
+    });
+  }
+
+  return generated.slice(0, 10);
+}
+
+/**
+ * Generate a personalized Relearn / Revision plan for failed quiz attempts
+ */
+export async function generateRelearnPlan(
+  topicTitle: string,
+  wrongQuestions: WrongQuestionDetail[]
+): Promise<string> {
+  const wrongSummary = wrongQuestions.map((w, idx) => `
+${idx + 1}. Question: ${w.question}
+- Subtopic tested: ${w.subtopic || topicTitle}
+- Your Answer: ${w.userAnswer} (Incorrect)
+- Correct Answer: ${w.correctAnswer}
+- Why: ${w.explanation}
+`).join('\n');
+
+  const prompt = `A student just attempted the 10-question mastery quiz for "${topicTitle}" and scored below the 70% passing threshold (7/10 required).
+They missed the following ${wrongQuestions.length} questions:
+
+${wrongSummary}
+
+Please write a highly encouraging, targeted, and comprehensive "Relearn & Revision Guide" in markdown.
+Include:
+1. 🎯 **Root Cause Analysis**: Where their conceptual gaps appear to be based on the questions they missed.
+2. 📖 **Targeted Revision Notes**: For each missed concept/subtopic, explain the concept simply, provide a concise code snippet or concrete example, and explain the key distinction to remember.
+3. ⚠️ **Common Trap to Avoid**: The common pitfall that tricked them in these questions.
+4. 🚀 **3-Minute Action Plan**: What exact steps they should take before retrying the quiz to pass with 100%.
+
+Use clear formatting with bolding, code blocks, and bullet points.`;
+
+  try {
+    const res = await queryAI({ prompt });
+    return res.text;
+  } catch {
+    return `### 📚 Relearn & Revision Guide for ${topicTitle}\n\nYou missed ${wrongQuestions.length} questions on: ${wrongQuestions.map(w => w.subtopic || w.question).join(', ')}.\n\n**Next Steps:**\n1. Review your notes and documentation for the subtopics above.\n2. Practice writing small code snippets verifying how each concept behaves.\n3. Retake the quiz when you are ready to score 7/10 or higher!`;
+  }
+}
+

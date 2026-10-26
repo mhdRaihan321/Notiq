@@ -27,17 +27,29 @@ export default function Home() {
       background: 'var(--bg-primary)',
     }}>
       <div style={{ textAlign: 'center' }}>
+        <img
+          src="/icon.svg"
+          alt="Notiq"
+          style={{
+            width: 52,
+            height: 52,
+            borderRadius: 13,
+            margin: '0 auto 16px',
+            display: 'block',
+            boxShadow: '0 8px 24px rgba(106, 85, 232, 0.45)',
+          }}
+        />
         <div style={{
-          width: 48,
-          height: 48,
+          width: 24,
+          height: 24,
           borderRadius: '50%',
-          border: '3px solid var(--border)',
-          borderTopColor: 'var(--accent)',
-          margin: '0 auto 16px',
+          border: '2px solid rgba(255, 255, 255, 0.1)',
+          borderTopColor: '#7c6af7',
+          margin: '0 auto 14px',
           animation: 'spin 0.8s linear infinite',
         }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Loading Notiq…</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 500 }}>Loading Notiq…</p>
       </div>
     </div>
   );

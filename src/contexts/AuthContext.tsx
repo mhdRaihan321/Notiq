@@ -65,9 +65,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           };
           setUser(recoveredBrototypeUser);
 
+          const shortWsName = (bUser.name ? `${bUser.name.split(' ')[0]} Hub` : 'My Hub').slice(0, 10);
           const defaultWs: Workspace = {
             id: `ws-${bUser.studentId || 'brototype'}`,
-            name: `${bUser.name || 'Student'}'s Hub`,
+            name: shortWsName,
             icon: '⚡',
             description: `${bUser.batchName || ''} • ${bUser.domainName || ''}`,
           };
@@ -167,9 +168,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('notiq_user', JSON.stringify(appUser));
     localStorage.setItem('notiq_token', token);
 
+    const shortWsName = (bUser.name ? `${bUser.name.split(' ')[0]} Hub` : 'My Hub').slice(0, 10);
     const defaultWs: Workspace = {
       id: `ws-${bUser.studentId || 'brototype'}`,
-      name: `${bUser.name}'s Hub`,
+      name: shortWsName,
       icon: '⚡',
       description: `${bUser.batchName || ''} • ${bUser.domainName || ''}`,
     };
