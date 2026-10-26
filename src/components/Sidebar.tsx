@@ -427,7 +427,11 @@ export default function Sidebar() {
               onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
               onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
             >
-              {activeWorkspace?.icon || '🏢'}
+              {activeWorkspace?.icon && activeWorkspace.icon !== '🏢' ? (
+                activeWorkspace.icon
+              ) : (
+                <img src="/icon.svg" alt="Notiq" style={{ width: 22, height: 22, borderRadius: 5 }} />
+              )}
             </button>
           </div>
         ) : (
@@ -472,7 +476,11 @@ export default function Sidebar() {
                   flexShrink: 0,
                 }}
               >
-                {activeWorkspace?.icon || '🏢'}
+                {activeWorkspace?.icon && activeWorkspace.icon !== '🏢' ? (
+                  activeWorkspace.icon
+                ) : (
+                  <img src="/icon.svg" alt="Notiq" style={{ width: 18, height: 18, borderRadius: 4 }} />
+                )}
               </div>
 
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -589,7 +597,11 @@ export default function Sidebar() {
                   if (ws.id !== activeWorkspace?.id) e.currentTarget.style.background = 'transparent';
                 }}
               >
-                <span style={{ fontSize: 15 }}>{ws.icon || '🏢'}</span>
+                {ws.icon && ws.icon !== '🏢' ? (
+                  <span style={{ fontSize: 15 }}>{ws.icon}</span>
+                ) : (
+                  <img src="/icon.svg" alt="Notiq" style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0 }} />
+                )}
                 <span style={{ flex: 1, fontWeight: ws.id === activeWorkspace?.id ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {ws.name}
                 </span>
@@ -1185,7 +1197,11 @@ export default function Sidebar() {
               </button>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-                <span style={{ fontSize: 16, flexShrink: 0 }}>{activeWorkspace?.icon || '🏢'}</span>
+                {activeWorkspace?.icon && activeWorkspace.icon !== '🏢' ? (
+                  <span style={{ fontSize: 16, flexShrink: 0 }}>{activeWorkspace.icon}</span>
+                ) : (
+                  <img src="/icon.svg" alt="Notiq" style={{ width: 20, height: 20, borderRadius: 5, flexShrink: 0 }} />
+                )}
                 <span style={{ fontSize: 14, fontWeight: 700, color: '#f8fafc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {activeWorkspace?.name || 'Notiq'}
                 </span>

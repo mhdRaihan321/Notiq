@@ -33,7 +33,7 @@ export default function RegisterPage() {
     <div style={styles.page}>
       <div style={styles.card} className="fade-in">
         <div style={styles.logo}>
-          <span style={styles.logoIcon}>N</span>
+          <img src="/icon.svg" alt="Notiq Logo" style={{ width: 36, height: 36, borderRadius: 9, boxShadow: '0 4px 12px rgba(106, 85, 232, 0.35)' }} />
           <span style={styles.logoText}>Notiq</span>
         </div>
         <h1 style={styles.title}>Create your account</h1>

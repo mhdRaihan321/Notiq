@@ -94,22 +94,18 @@ export default function LoginPage() {
       >
         {/* Brand Header */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div
+          <img
+            src="/icon.svg"
+            alt="Notiq Logo"
             style={{
-              width: 52,
-              height: 52,
+              width: 56,
+              height: 56,
               borderRadius: 14,
-              background: 'linear-gradient(135deg, #7c6af7 0%, #4f46e5 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              display: 'block',
               margin: '0 auto 16px',
-              boxShadow: '0 8px 24px rgba(124, 106, 247, 0.45)',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
+              boxShadow: '0 8px 24px rgba(106, 85, 232, 0.45)',
             }}
-          >
-            <span style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', letterSpacing: '-0.5px' }}>N</span>
-          </div>
+          />
 
           <h1 style={{ fontSize: 24, fontWeight: 800, color: '#f8fafc', letterSpacing: '-0.5px', marginBottom: 6 }}>
             Welcome to Notiq
