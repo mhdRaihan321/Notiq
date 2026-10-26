@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import Sidebar from '@/components/Sidebar';
@@ -9,19 +9,49 @@ import ChatBot from '@/components/ChatBot';
 export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const router = useRouter();
+  const [isMobile, setIsMobile] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     if (!isLoading && !user) {
       router.replace('/login');
     }
   }, [user, isLoading, router]);
 
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
   const showContent = !isLoading && !!user;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: 'var(--bg-primary)', overflow: 'hidden', position: 'relative' }}>
+    <div
+      suppressHydrationWarning
+      style={{
+        display: 'flex',
+        height: '100vh',
+        background: 'var(--bg-primary)',
+        overflow: 'hidden',
+        position: 'relative',
+      }}
+    >
       {showContent && <Sidebar />}
-      <main style={{ flex: 1, overflow: 'auto', background: 'var(--bg-primary)', visibility: showContent ? 'visible' : 'hidden' }}>
+      <main
+        suppressHydrationWarning
+        style={{
+          flex: 1,
+          overflow: 'auto',
+          background: 'var(--bg-primary)',
+          visibility: showContent ? 'visible' : 'hidden',
+          paddingTop: showContent && isMobile ? 48 : 0,
+          marginLeft: 0,
+          width: '100%',
+        }}
+      >
         {children}
       </main>
       {showContent && <ChatBot />}
@@ -37,4 +67,3 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
     </div>
   );
 }
-

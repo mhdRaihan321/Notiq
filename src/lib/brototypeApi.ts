@@ -148,62 +148,104 @@ export interface SubItem {
   indent?: number;
 }
 
-export const parseTopicSubItems = (description: string): SubItem[] => {
-  if (!description) return [];
-  const lines = description.split('\n');
+import { generateQuizForTopic } from './aiService';
+
+export const parseTopicSubItems = (description: string, fallbackTitle?: string): SubItem[] => {
   const items: SubItem[] = [];
 
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
+  if (description) {
+    const lines = description.split('\n');
 
-    // Detect indentation/sub-bullets like i., ii., a., 1., etc.
-    const isRoman = /^[ivxlcdm]+\.\s*(.+)/i.exec(line);
-    const isAlpha = /^([a-zA-Z]\.|\([a-zA-Z]\))\s*(.+)/i.exec(line);
-    const isNum = /^(\d+[.)]|\(\d+\))\s*(.+)/i.exec(line);
-    const isBullet = /^([-*•►▪▫])\s*(.+)/.exec(line);
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
 
-    if (isRoman) {
-      items.push({
-        id: `sub-${Math.random().toString(36).substring(2, 9)}`,
-        prefix: line.split(/\s+/)[0],
-        text: isRoman[1].trim(),
-        completed: false,
-        indent: 1,
-      });
-    } else if (isAlpha) {
-      items.push({
-        id: `sub-${Math.random().toString(36).substring(2, 9)}`,
-        prefix: isAlpha[1],
-        text: isAlpha[2].trim(),
-        completed: false,
-        indent: 0,
-      });
-    } else if (isNum) {
-      items.push({
-        id: `sub-${Math.random().toString(36).substring(2, 9)}`,
-        prefix: isNum[1],
-        text: isNum[2].trim(),
-        completed: false,
-        indent: 0,
-      });
-    } else if (isBullet) {
-      items.push({
-        id: `sub-${Math.random().toString(36).substring(2, 9)}`,
-        prefix: isBullet[1],
-        text: isBullet[2].trim(),
-        completed: false,
-        indent: 0,
-      });
-    } else if (line.length > 2 && line.length < 180 && !line.startsWith('http') && !line.startsWith('//')) {
-      items.push({
-        id: `sub-${Math.random().toString(36).substring(2, 9)}`,
-        prefix: '•',
-        text: line,
-        completed: false,
-        indent: 0,
-      });
+      // Detect indentation/sub-bullets like i., ii., a., 1., etc.
+      const isRoman = /^[ivxlcdm]+\.\s*(.+)/i.exec(line);
+      const isAlpha = /^([a-zA-Z]\.|\([a-zA-Z]\))\s*(.+)/i.exec(line);
+      const isNum = /^(\d+[.)]|\(\d+\))\s*(.+)/i.exec(line);
+      const isBullet = /^([-*•►▪▫])\s*(.+)/.exec(line);
+
+      if (isRoman) {
+        items.push({
+          id: `sub-${Math.random().toString(36).substring(2, 9)}`,
+          prefix: line.split(/\s+/)[0],
+          text: isRoman[1].trim(),
+          completed: false,
+          indent: 1,
+        });
+      } else if (isAlpha) {
+        items.push({
+          id: `sub-${Math.random().toString(36).substring(2, 9)}`,
+          prefix: isAlpha[1],
+          text: isAlpha[2].trim(),
+          completed: false,
+          indent: 0,
+        });
+      } else if (isNum) {
+        items.push({
+          id: `sub-${Math.random().toString(36).substring(2, 9)}`,
+          prefix: isNum[1],
+          text: isNum[2].trim(),
+          completed: false,
+          indent: 0,
+        });
+      } else if (isBullet) {
+        items.push({
+          id: `sub-${Math.random().toString(36).substring(2, 9)}`,
+          prefix: isBullet[1],
+          text: isBullet[2].trim(),
+          completed: false,
+          indent: 0,
+        });
+      } else if (line.length > 2 && line.length < 240 && !line.startsWith('http') && !line.startsWith('//')) {
+        items.push({
+          id: `sub-${Math.random().toString(36).substring(2, 9)}`,
+          prefix: '•',
+          text: line,
+          completed: false,
+          indent: 0,
+        });
+      }
     }
+
+    // If no explicit bullets matched, break sentences into checklist items
+    if (items.length === 0 && description.trim().length > 0) {
+      const sentences = description.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 6);
+      for (let i = 0; i < sentences.length; i++) {
+        const s = sentences[i].trim();
+        if (s) {
+          items.push({
+            id: `sub-${Math.random().toString(36).substring(2, 9)}`,
+            prefix: `${i + 1}.`,
+            text: s,
+            completed: false,
+            indent: 0,
+          });
+        }
+      }
+    }
+  }
+
+  // If still empty, supply rich default checklist items based on topic title
+  if (items.length === 0 && fallbackTitle) {
+    const cleanTitle = fallbackTitle.replace(/^\d+[.)]\s*/, '').trim();
+    const defaults = [
+      `Understand the core definitions and fundamentals of ${cleanTitle}`,
+      `Review code syntax, practical implementations, and real-world examples`,
+      `Master key methods, parameters, and execution behaviors`,
+      `Identify common pitfalls, edge cases, and limitations`,
+      `Practice hands-on problem solving and technical interview questions`,
+    ];
+    defaults.forEach((txt, idx) => {
+      items.push({
+        id: `sub-${Math.random().toString(36).substring(2, 9)}`,
+        prefix: `${idx + 1}.`,
+        text: txt,
+        completed: false,
+        indent: 0,
+      });
+    });
   }
 
   return items;
@@ -229,10 +271,20 @@ export const syncTaskToNotiqTodos = async (task: BrototypeTask, workspaceId?: st
 
   if (topics.length > 0) {
     for (const top of topics) {
-      const subItems = parseTopicSubItems(top.description || '');
+      const title = top.topicName || fullTask.taskname;
+      const subItems = parseTopicSubItems(top.description || '', title);
+
+      // Generate 10 quiz questions using AI for this topic
+      let questions: any[] = [];
+      try {
+        questions = await generateQuizForTopic(title, subItems.map(s => s.text));
+      } catch {
+        questions = [];
+      }
+
       generatedTodos.push({
         id: `bt-top-${top.taskAssignmentTopicIdentifier || top.taskAssignmentTopicId || Math.random().toString(36).substring(2, 9)}`,
-        title: top.topicName || fullTask.taskname,
+        title,
         topicHeading: `${fullTask.paperName || 'Paper'} • ${top.topicName || 'Topic'}`,
         description: top.description || '',
         status: fullTask.taskStatus?.toLowerCase() === 'completed' ? 'done' : 'todo',
@@ -241,14 +293,24 @@ export const syncTaskToNotiqTodos = async (task: BrototypeTask, workspaceId?: st
         assignedAt: fullTask.assignedAt,
         tags: ['Brototype', 'Technical', fullTask.semesterName || 'Sem 1', fullTask.paperName || 'Paper 1'].filter(Boolean),
         subItems,
+        questions,
         createdAt: fullTask.assignedAt || new Date().toISOString(),
       });
     }
   } else {
-    const subItems = parseTopicSubItems(fullTask.description || '');
+    const title = fullTask.taskname;
+    const subItems = parseTopicSubItems(fullTask.description || '', title);
+
+    let questions: any[] = [];
+    try {
+      questions = await generateQuizForTopic(title, subItems.map(s => s.text));
+    } catch {
+      questions = [];
+    }
+
     generatedTodos.push({
       id: `bt-${fullTask.taskAssignmentIdentifier}`,
-      title: fullTask.taskname,
+      title,
       topicHeading: `${fullTask.semesterName} • ${fullTask.paperName}`,
       description: fullTask.description || '',
       status: fullTask.taskStatus?.toLowerCase() === 'completed' ? 'done' : 'todo',
@@ -257,11 +319,12 @@ export const syncTaskToNotiqTodos = async (task: BrototypeTask, workspaceId?: st
       assignedAt: fullTask.assignedAt,
       tags: ['Brototype', 'Technical', fullTask.semesterName || 'Sem 1', fullTask.paperName || 'Paper 1'].filter(Boolean),
       subItems,
+      questions,
       createdAt: fullTask.assignedAt || new Date().toISOString(),
     });
   }
 
-  // 2. Persist to localStorage 'notiq_todos' with sub-items checklist
+  // 2. Persist to localStorage 'notiq_todos' with sub-items checklist & quiz questions
   if (typeof window !== 'undefined') {
     try {
       const raw = localStorage.getItem('notiq_todos');
@@ -302,6 +365,9 @@ export const syncTaskToNotiqTodos = async (task: BrototypeTask, workspaceId?: st
         dueDate: g.dueDate || null,
         status: g.status,
         tags: g.tags,
+        topicHeading: g.topicHeading,
+        subItems: g.subItems,
+        questions: g.questions,
       }).catch(() => {});
     }
   }

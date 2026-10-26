@@ -9,6 +9,7 @@ import BrototypeModal from '@/components/BrototypeModal';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [isBrototypeModalOpen, setIsBrototypeModalOpen] = useState(false);
@@ -23,223 +24,297 @@ export default function LoginPage() {
       await login(email, password);
       router.replace('/workspace');
     } catch (err: any) {
-      setError(err?.response?.data?.message || 'Login failed. Please try again.');
+      setError(err?.response?.data?.message || 'Login failed. Please verify your credentials.');
     } finally {
       setLoading(false);
     }
   };
 
+  const fillDemo = () => {
+    setEmail('demo@notiq.com');
+    setPassword('demo1234');
+  };
+
   return (
-    <div style={styles.page}>
-      <div style={styles.card} className="fade-in">
-        {/* Logo */}
-        <div style={styles.logo}>
-          <span style={styles.logoIcon}>N</span>
-          <span style={styles.logoText}>Notiq</span>
+    <div
+      suppressHydrationWarning
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'radial-gradient(circle at 50% 20%, rgba(124, 106, 247, 0.16) 0%, rgba(15, 15, 20, 0.95) 70%), #0c0d12',
+        padding: '24px 16px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Ambient background glows */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '-10%',
+          left: '20%',
+          width: 500,
+          height: 500,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(124, 106, 247, 0.22) 0%, transparent 70%)',
+          filter: 'blur(80px)',
+          pointerEvents: 'none',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          bottom: '-10%',
+          right: '15%',
+          width: 450,
+          height: 450,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, transparent 70%)',
+          filter: 'blur(80px)',
+          pointerEvents: 'none',
+        }}
+      />
+
+      <div
+        className="fade-in"
+        style={{
+          background: 'rgba(22, 23, 30, 0.85)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: 20,
+          padding: '44px 36px',
+          width: '100%',
+          maxWidth: 420,
+          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.7), 0 0 35px rgba(124, 106, 247, 0.12)',
+          backdropFilter: 'blur(20px)',
+          position: 'relative',
+          zIndex: 1,
+        }}
+      >
+        {/* Brand Header */}
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: 14,
+              background: 'linear-gradient(135deg, #7c6af7 0%, #4f46e5 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 16px',
+              boxShadow: '0 8px 24px rgba(124, 106, 247, 0.45)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+            }}
+          >
+            <span style={{ fontSize: 26, fontWeight: 900, color: '#ffffff', letterSpacing: '-0.5px' }}>N</span>
+          </div>
+
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: '#f8fafc', letterSpacing: '-0.5px', marginBottom: 6 }}>
+            Welcome to Notiq
+          </h1>
+          <p style={{ fontSize: 14, color: 'var(--text-secondary, #94a3b8)', margin: 0 }}>
+            Curriculum tracking & workspace mastery
+          </p>
         </div>
-        <h1 style={styles.title}>Welcome back</h1>
-        <p style={styles.subtitle}>Sign in to your workspace</p>
 
-        {error && <div style={styles.error}>{error}</div>}
+        {error && (
+          <div
+            style={{
+              background: 'rgba(239, 68, 68, 0.14)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              borderRadius: 10,
+              padding: '11px 14px',
+              color: '#fca5a5',
+              fontSize: 13,
+              marginBottom: 20,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              animation: 'shake 0.3s ease-in-out',
+            }}
+          >
+            <span>⚠️</span>
+            <span>{error}</span>
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.field}>
-            <label style={styles.label}>Email</label>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#cbd5e1' }}>Email address</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               required
-              style={styles.input}
+              style={{
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: 9,
+                padding: '12px 14px',
+                color: '#ffffff',
+                fontSize: 14,
+                outline: 'none',
+                transition: 'border-color 0.15s, box-shadow 0.15s',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = 'var(--accent, #7c6af7)';
+                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(124, 106, 247, 0.2)';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
             />
           </div>
-          <div style={styles.field}>
-            <label style={styles.label}>Password</label>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ fontSize: 13, fontWeight: 600, color: '#cbd5e1' }}>Password</label>
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-muted, #94a3b8)',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
             <input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
-              style={styles.input}
+              style={{
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: 9,
+                padding: '12px 14px',
+                color: '#ffffff',
+                fontSize: 14,
+                outline: 'none',
+                transition: 'border-color 0.15s, box-shadow 0.15s',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = 'var(--accent, #7c6af7)';
+                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(124, 106, 247, 0.2)';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
             />
           </div>
-          <button type="submit" disabled={loading} style={styles.btn}>
-            {loading ? 'Signing in…' : 'Sign in'}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              background: 'linear-gradient(135deg, var(--accent, #7c6af7) 0%, #6366f1 100%)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: 9,
+              padding: '13px',
+              fontSize: 14.5,
+              fontWeight: 700,
+              cursor: loading ? 'not-allowed' : 'pointer',
+              marginTop: 4,
+              boxShadow: '0 4px 18px rgba(124, 106, 247, 0.38)',
+              transition: 'transform 0.1s, opacity 0.15s',
+            }}
+          >
+            {loading ? 'Signing in…' : 'Sign in to Workspace →'}
           </button>
         </form>
 
-        {/* Divider */}
-        <div style={styles.dividerContainer}>
-          <div style={styles.dividerLine} />
-          <span style={styles.dividerText}>or continue with</span>
-          <div style={styles.dividerLine} />
+        {/* Demo Account Helper */}
+        <div style={{ marginTop: 14, textAlign: 'center' }}>
+          <button
+            type="button"
+            onClick={fillDemo}
+            style={{
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px dashed rgba(255, 255, 255, 0.16)',
+              borderRadius: 7,
+              color: 'var(--text-muted, #94a3b8)',
+              fontSize: 12,
+              padding: '5px 10px',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'var(--accent, #7c6af7)';
+              e.currentTarget.style.color = '#fff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.16)';
+              e.currentTarget.style.color = 'var(--text-muted, #94a3b8)';
+            }}
+          >
+            ⚡ Auto-fill Demo Credentials
+          </button>
         </div>
 
-        {/* Brototype Connect Button */}
+        {/* Divider */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '22px 0 16px' }}>
+          <div style={{ flex: 1, height: 1, background: 'rgba(255, 255, 255, 0.08)' }} />
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.6px', fontWeight: 600 }}>
+            or connect portal
+          </span>
+          <div style={{ flex: 1, height: 1, background: 'rgba(255, 255, 255, 0.08)' }} />
+        </div>
+
+        {/* Brototype Portal Button */}
         <button
           type="button"
           onClick={() => setIsBrototypeModalOpen(true)}
-          style={styles.brototypeBtn}
+          style={{
+            width: '100%',
+            padding: '11px 16px',
+            borderRadius: 9,
+            border: '1px solid rgba(139, 92, 246, 0.35)',
+            background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.18) 0%, rgba(59, 130, 246, 0.12) 100%)',
+            color: '#ffffff',
+            fontSize: 13.5,
+            fontWeight: 650,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+            transition: 'all 0.18s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(139, 92, 246, 0.65)';
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(124, 58, 237, 0.28) 0%, rgba(59, 130, 246, 0.2) 100%)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(139, 92, 246, 0.35)';
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(124, 58, 237, 0.18) 0%, rgba(59, 130, 246, 0.12) 100%)';
+          }}
         >
-          <span style={styles.brototypeIcon}>⚡</span>
-          <span>Connect with Brototype</span>
+          <span style={{ fontSize: 16 }}>⚡</span>
+          <span>Connect Brototype Student Account</span>
         </button>
 
-        <p style={styles.footer}>
+        <p style={{ textAlign: 'center', marginTop: 24, fontSize: 13.5, color: 'var(--text-muted, #94a3b8)', marginBottom: 0 }}>
           Don&apos;t have an account?{' '}
-          <Link href="/register" style={styles.link}>Create one</Link>
+          <Link href="/register" style={{ color: 'var(--accent, #7c6af7)', textDecoration: 'none', fontWeight: 650 }}>
+            Create one free
+          </Link>
         </p>
 
-        <BrototypeModal
-          isOpen={isBrototypeModalOpen}
-          onClose={() => setIsBrototypeModalOpen(false)}
-        />
+        <BrototypeModal isOpen={isBrototypeModalOpen} onClose={() => setIsBrototypeModalOpen(false)} />
       </div>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'radial-gradient(ellipse at 30% 20%, rgba(124,106,247,0.08) 0%, transparent 60%), var(--bg-primary)',
-    padding: '24px',
-  },
-  card: {
-    background: 'var(--bg-secondary)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-lg)',
-    padding: '48px 40px',
-    width: '100%',
-    maxWidth: 400,
-    boxShadow: 'var(--shadow-lg)',
-  },
-  logo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 32,
-    justifyContent: 'center',
-  },
-  logoIcon: {
-    width: 36,
-    height: 36,
-    background: 'var(--accent)',
-    borderRadius: 8,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontWeight: 800,
-    fontSize: 18,
-    color: '#fff',
-  } as React.CSSProperties,
-  logoText: {
-    fontSize: 22,
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-    letterSpacing: '-0.5px',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: 'var(--text-secondary)',
-    textAlign: 'center',
-    marginBottom: 32,
-  },
-  error: {
-    background: 'rgba(239,68,68,0.1)',
-    border: '1px solid rgba(239,68,68,0.3)',
-    borderRadius: 8,
-    padding: '12px 16px',
-    color: '#f87171',
-    fontSize: 14,
-    marginBottom: 24,
-  },
-  form: { display: 'flex', flexDirection: 'column', gap: 20 },
-  field: { display: 'flex', flexDirection: 'column', gap: 8 },
-  label: { fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' },
-  input: {
-    background: 'var(--bg-tertiary)',
-    border: '1px solid var(--border)',
-    borderRadius: 8,
-    padding: '12px 14px',
-    color: 'var(--text-primary)',
-    fontSize: 14,
-    outline: 'none',
-    transition: 'border-color 0.15s',
-  },
-  btn: {
-    background: 'var(--accent)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 8,
-    padding: '13px',
-    fontSize: 15,
-    fontWeight: 600,
-    cursor: 'pointer',
-    marginTop: 4,
-    transition: 'opacity 0.15s, transform 0.1s',
-  },
-  footer: {
-    textAlign: 'center',
-    marginTop: 28,
-    fontSize: 14,
-    color: 'var(--text-muted)',
-  },
-  link: { color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 },
-  dividerContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    margin: '20px 0 16px',
-    gap: 12,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    background: 'var(--border)',
-  },
-  dividerText: {
-    fontSize: 12,
-    color: 'var(--text-muted)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  },
-  brototypeBtn: {
-    width: '100%',
-    padding: '12px 16px',
-    borderRadius: 8,
-    border: '1px solid rgba(139, 92, 246, 0.35)',
-    background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.15) 0%, rgba(59, 130, 246, 0.15) 100%)',
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
-    transition: 'all 0.2s',
-  },
-  brototypeIcon: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    background: 'linear-gradient(135deg, #7c3aed 0%, #2563eb 100%)',
-    fontSize: 13,
-  },
-};

@@ -502,7 +502,9 @@ export default function AIAssistant({
                     maxWidth: '100%',
                     color: '#38bdf8',
                     lineHeight: 1.5,
-                    whiteSpace: 'pre',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    overflowWrap: 'anywhere',
                   }}
                 >
                   <code>{blockCode}</code>

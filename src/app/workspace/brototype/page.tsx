@@ -30,6 +30,14 @@ export default function BrototypeHubPage() {
   const [importSuccessMsg, setImportSuccessMsg] = useState('');
   const [filterSemester, setFilterSemester] = useState<number | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   const loadData = useCallback(async () => {
     const token = getSavedBrototypeToken();
@@ -187,9 +195,9 @@ export default function BrototypeHubPage() {
   });
 
   return (
-    <div style={styles.container}>
+    <div style={{ ...styles.container, padding: isMobile ? '20px 14px' : '32px 40px' }}>
       {/* Top Banner */}
-      <div style={styles.topBar}>
+      <div style={{ ...styles.topBar, paddingTop: isMobile ? 44 : 0 }}>
         <div>
           <h1 style={styles.pageTitle}>Brototype Student Hub</h1>
           <p style={styles.pageSubtitle}>
@@ -273,21 +281,153 @@ export default function BrototypeHubPage() {
       {/* Connected Dashboard View */}
       {user && (
         <>
-          {/* Profile Card */}
-          <div style={styles.profileCard}>
-            <div style={styles.profileAvatar}>{user.name ? user.name.charAt(0) : 'B'}</div>
-            <div style={{ flex: 1 }}>
-              <div style={styles.profileName}>{user.name}</div>
-              <div style={styles.profileDetails}>
-                <span style={styles.pill}>{user.batchName}</span>
-                <span style={styles.pill}>{user.domainName}</span>
-                <span style={styles.pillActive}>Active Student</span>
+          {/* Profile Card - Responsive */}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: isMobile ? 'column' : 'row',
+              alignItems: isMobile ? 'stretch' : 'center',
+              gap: isMobile ? 12 : 18,
+              padding: isMobile ? '16px 14px' : '20px 24px',
+              borderRadius: 14,
+              background: 'var(--bg-secondary, #161616)',
+              border: '1px solid var(--border, rgba(255, 255, 255, 0.08))',
+              marginBottom: 24,
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
+              boxSizing: 'border-box',
+              width: '100%',
+            }}
+          >
+            {/* Top/Left Section: Avatar + Name + Pills */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  width: isMobile ? 44 : 50,
+                  height: isMobile ? 44 : 50,
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%)',
+                  color: '#fff',
+                  fontSize: isMobile ? 18 : 22,
+                  fontWeight: 800,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  boxShadow: '0 4px 14px rgba(124, 58, 237, 0.35)',
+                }}
+              >
+                {user.name ? user.name.charAt(0).toUpperCase() : 'B'}
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 5 }}>
+                  <h3 style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, color: '#f8fafc', margin: 0, letterSpacing: '-0.2px' }}>
+                    {user.name}
+                  </h3>
+                  <span
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: 99,
+                      background: 'rgba(34, 197, 94, 0.16)',
+                      color: '#4ade80',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      border: '1px solid rgba(34, 197, 94, 0.3)',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Active Student
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {user.batchName && (
+                    <span
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        background: 'rgba(255, 255, 255, 0.06)',
+                        fontSize: 11.5,
+                        color: '#cbd5e1',
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {user.batchName}
+                    </span>
+                  )}
+                  {user.domainName && (
+                    <span
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        background: 'rgba(124, 106, 247, 0.14)',
+                        border: '1px solid rgba(124, 106, 247, 0.28)',
+                        fontSize: 11.5,
+                        color: '#c4b5fd',
+                        fontWeight: 600,
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title={user.domainName}
+                    >
+                      {user.domainName}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
-            <div style={styles.profileMeta}>
-              <div>📱 {user.mobile}</div>
-              <div>✉️ {user.email}</div>
-            </div>
+
+            {/* Contact Details (Phone & Email) */}
+            {(user.mobile || user.email) && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: isMobile ? 'row' : 'column',
+                  flexWrap: 'wrap',
+                  alignItems: isMobile ? 'flex-start' : 'flex-end',
+                  justifyContent: 'space-between',
+                  gap: isMobile ? 10 : 5,
+                  fontSize: 12,
+                  color: 'var(--text-muted, #94a3b8)',
+                  borderTop: isMobile ? '1px solid rgba(255, 255, 255, 0.07)' : 'none',
+                  paddingTop: isMobile ? 10 : 0,
+                  minWidth: 0,
+                }}
+              >
+                {user.mobile && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                    <span>📱</span>
+                    <span>{user.mobile}</span>
+                  </div>
+                )}
+                {user.email && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      minWidth: 0,
+                      maxWidth: '100%',
+                    }}
+                  >
+                    <span style={{ flexShrink: 0 }}>✉️</span>
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title={user.email}
+                    >
+                      {user.email}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
 
@@ -331,7 +471,7 @@ export default function BrototypeHubPage() {
             ) : filteredTasks.length === 0 ? (
               <div style={styles.emptyBox}>No tasks matching your filter.</div>
             ) : (
-              <div style={styles.taskGrid}>
+              <div style={{ ...styles.taskGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(300px, 1fr))' }}>
                 {filteredTasks.map((t) => (
                   <div key={t.taskAssignmentIdentifier} style={styles.taskCard}>
                     <div style={styles.taskCardHeader}>
@@ -374,7 +514,7 @@ export default function BrototypeHubPage() {
       {/* Task Details Drawer / Modal */}
       {selectedTask && (
         <div style={styles.drawerOverlay} onClick={() => setSelectedTask(null)}>
-          <div style={styles.drawer} onClick={(e) => e.stopPropagation()}>
+          <div style={{ ...styles.drawer, maxWidth: isMobile ? '100%' : 580 }} onClick={(e) => e.stopPropagation()}>
             <div style={styles.drawerHeader}>
               <div>
                 <span style={styles.taskTypeBadge}>{selectedTask.tasktype}</span>

@@ -9,6 +9,14 @@ export default function ChatBot() {
   const { activeWorkspace, user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   // Keyboard shortcut: Ctrl + J or Alt + A to toggle chatbot
   useEffect(() => {
@@ -26,8 +34,8 @@ export default function ChatBot() {
     <div
       style={{
         position: 'fixed',
-        bottom: 20,
-        right: 20,
+        bottom: isMobile ? 14 : 20,
+        right: isMobile ? 14 : 20,
         zIndex: 9999,
         fontFamily: 'inherit',
       }}
@@ -36,14 +44,16 @@ export default function ChatBot() {
       {isOpen && (
         <div
           style={{
-            position: 'absolute',
-            bottom: 60,
-            right: 0,
-            width: isExpanded ? 'min(860px, calc(100vw - 32px))' : 'min(440px, calc(100vw - 32px))',
-            height: isExpanded ? 'min(800px, calc(100vh - 80px))' : 'min(620px, calc(100vh - 90px))',
-            maxHeight: 'calc(100vh - 80px)',
-            maxWidth: 'calc(100vw - 28px)',
-            borderRadius: 16,
+            position: isMobile ? 'fixed' : 'absolute',
+            bottom: isMobile ? 12 : 60,
+            right: isMobile ? 12 : 0,
+            left: isMobile ? 12 : 'auto',
+            top: isMobile ? 12 : 'auto',
+            width: isMobile ? 'auto' : (isExpanded ? 'min(860px, calc(100vw - 32px))' : 'min(440px, calc(100vw - 32px))'),
+            height: isMobile ? 'auto' : (isExpanded ? 'min(800px, calc(100vh - 80px))' : 'min(620px, calc(100vh - 90px))'),
+            maxHeight: isMobile ? 'none' : 'calc(100vh - 80px)',
+            maxWidth: isMobile ? 'none' : 'calc(100vw - 28px)',
+            borderRadius: isMobile ? 14 : 16,
             overflow: 'hidden',
             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 32px rgba(99, 102, 241, 0.3)',
             display: 'flex',
