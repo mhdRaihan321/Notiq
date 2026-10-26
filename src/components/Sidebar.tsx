@@ -20,6 +20,7 @@ import {
   LogOut,
   X,
   Menu,
+  Trash2,
 } from 'lucide-react';
 
 interface Page {
@@ -142,21 +143,48 @@ export default function Sidebar() {
 
   // Load pages
   const loadPages = useCallback(async () => {
-    if (!activeWorkspace) return;
+    let allPages: Page[] = [];
+
+    // 1. Fetch from backend API if activeWorkspace exists
+    if (activeWorkspace) {
+      try {
+        const { data } = await pageApi.getAll(activeWorkspace.id);
+        if (data?.pages && Array.isArray(data.pages)) {
+          allPages = data.pages.filter((p: Page) => !p.parentId);
+        }
+      } catch {}
+    }
+
+    // 2. Load from localStorage (notiq_pages) and merge!
     try {
-      const { data } = await pageApi.getAll(activeWorkspace.id);
-      if (data?.pages && Array.isArray(data.pages)) {
-        setPages(data.pages.filter((p: Page) => !p.parentId).slice(0, 10));
-        return;
+      const local = typeof window !== 'undefined' ? localStorage.getItem('notiq_pages') : null;
+      if (local) {
+        const localList: Page[] = JSON.parse(local);
+        for (const lp of localList) {
+          if (!allPages.some((p) => p.id === lp.id)) {
+            allPages.push(lp);
+          }
+        }
       }
     } catch {}
 
+    // 3. Filter out any pages that were deleted
     try {
-      const local = localStorage.getItem('notiq_pages');
-      if (local) {
-        setPages(JSON.parse(local).filter((p: Page) => !p.parentId).slice(0, 10));
+      const deletedRaw = typeof window !== 'undefined' ? localStorage.getItem('notiq_deleted_pages') : null;
+      const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
+      allPages = allPages.filter((p) => !deletedIds.includes(p.id));
+
+      // Seed Hoisting Guide if not deleted and not in list
+      if (!deletedIds.includes('page-js-hoisting-guide') && !allPages.some(p => p.id === 'page-js-hoisting-guide' || p.title?.toLowerCase().includes('hoisting'))) {
+        allPages.unshift({
+          id: 'page-js-hoisting-guide',
+          title: 'JavaScript Hoisting in Simple English',
+          icon: '⚡',
+        });
       }
     } catch {}
+
+    setPages(allPages.slice(0, 20));
   }, [activeWorkspace]);
 
   useEffect(() => {
@@ -164,9 +192,15 @@ export default function Sidebar() {
   }, [loadPages]);
 
   useEffect(() => {
-    const handlePageCreated = () => loadPages();
-    window.addEventListener('notiq:page-created', handlePageCreated);
-    return () => window.removeEventListener('notiq:page-created', handlePageCreated);
+    const handlePageEvent = () => loadPages();
+    window.addEventListener('notiq:page-created', handlePageEvent);
+    window.addEventListener('notiq:page-deleted', handlePageEvent);
+    window.addEventListener('storage', handlePageEvent);
+    return () => {
+      window.removeEventListener('notiq:page-created', handlePageEvent);
+      window.removeEventListener('notiq:page-deleted', handlePageEvent);
+      window.removeEventListener('storage', handlePageEvent);
+    };
   }, [loadPages]);
 
   // Update pending task count
@@ -215,6 +249,49 @@ export default function Sidebar() {
       window.dispatchEvent(new CustomEvent('notiq:page-created'));
     } catch {}
     router.push(`/workspace/pages/${localId}`);
+  };
+
+  const handleDeletePage = async (e: React.MouseEvent, pageId: string, pageTitle: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!confirm(`Delete page "${pageTitle || 'Untitled'}"?`)) return;
+
+    // 1. Remove from local pages state
+    setPages((prev) => prev.filter((p) => p.id !== pageId));
+
+    // 2. Add to deleted tracking
+    try {
+      const deletedRaw = typeof window !== 'undefined' ? localStorage.getItem('notiq_deleted_pages') : null;
+      const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
+      if (!deletedIds.includes(pageId)) {
+        deletedIds.push(pageId);
+        localStorage.setItem('notiq_deleted_pages', JSON.stringify(deletedIds));
+      }
+    } catch {}
+
+    // 3. Remove from notiq_pages
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('notiq_pages') : null;
+      if (raw) {
+        const list = JSON.parse(raw).filter((p: any) => p.id !== pageId);
+        localStorage.setItem('notiq_pages', JSON.stringify(list));
+      }
+    } catch {}
+
+    // 4. API delete
+    try {
+      await pageApi.delete(pageId);
+    } catch {}
+
+    // 5. Notify events
+    window.dispatchEvent(new CustomEvent('notiq:page-deleted', { detail: { id: pageId } }));
+    window.dispatchEvent(new CustomEvent('notiq:page-created'));
+
+    // 6. Redirect if user was viewing this deleted page
+    if (pathname === `/workspace/pages/${pageId}`) {
+      router.replace('/workspace/pages');
+    }
   };
 
   const handleCreateWorkspace = async () => {
@@ -427,7 +504,7 @@ export default function Sidebar() {
               onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.05)')}
               onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
             >
-              {activeWorkspace?.icon && activeWorkspace.icon !== '🏢' ? (
+              {activeWorkspace?.icon && activeWorkspace.icon !== '🏢' && activeWorkspace.icon !== '⚡' && activeWorkspace.icon !== 'notiq' ? (
                 activeWorkspace.icon
               ) : (
                 <img src="/icon.svg" alt="Notiq" style={{ width: 22, height: 22, borderRadius: 5 }} />
@@ -476,7 +553,7 @@ export default function Sidebar() {
                   flexShrink: 0,
                 }}
               >
-                {activeWorkspace?.icon && activeWorkspace.icon !== '🏢' ? (
+                {activeWorkspace?.icon && activeWorkspace.icon !== '🏢' && activeWorkspace.icon !== '⚡' && activeWorkspace.icon !== 'notiq' ? (
                   activeWorkspace.icon
                 ) : (
                   <img src="/icon.svg" alt="Notiq" style={{ width: 18, height: 18, borderRadius: 4 }} />
@@ -597,7 +674,7 @@ export default function Sidebar() {
                   if (ws.id !== activeWorkspace?.id) e.currentTarget.style.background = 'transparent';
                 }}
               >
-                {ws.icon && ws.icon !== '🏢' ? (
+                {ws.icon && ws.icon !== '🏢' && ws.icon !== '⚡' && ws.icon !== 'notiq' ? (
                   <span style={{ fontSize: 15 }}>{ws.icon}</span>
                 ) : (
                   <img src="/icon.svg" alt="Notiq" style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0 }} />
@@ -781,21 +858,20 @@ export default function Sidebar() {
             {filteredPages.map((page) => {
               const active = pathname === `/workspace/pages/${page.id}`;
               return (
-                <Link
+                <div
                   key={page.id}
-                  href={`/workspace/pages/${page.id}`}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 8,
-                    padding: '6px 10px',
+                    justifyContent: 'space-between',
+                    padding: '5px 8px 5px 10px',
                     borderRadius: 6,
-                    textDecoration: 'none',
                     fontSize: 13,
                     color: active ? '#ffffff' : 'var(--text-secondary, #94a3b8)',
                     background: active ? 'rgba(124, 106, 247, 0.16)' : 'transparent',
                     border: active ? '1px solid rgba(124, 106, 247, 0.3)' : '1px solid transparent',
                     transition: 'all 0.15s ease',
+                    position: 'relative',
                   }}
                   onMouseEnter={(e) => {
                     if (!active) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
@@ -804,11 +880,52 @@ export default function Sidebar() {
                     if (!active) e.currentTarget.style.background = 'transparent';
                   }}
                 >
-                  <span style={{ fontSize: 14 }}>{page.icon || '📄'}</span>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {page.title || 'Untitled'}
-                  </span>
-                </Link>
+                  <Link
+                    href={`/workspace/pages/${page.id}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      flex: 1,
+                      minWidth: 0,
+                      textDecoration: 'none',
+                      color: 'inherit',
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{page.icon || '📄'}</span>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {page.title || 'Untitled'}
+                    </span>
+                  </Link>
+
+                  <button
+                    onClick={(e) => handleDeletePage(e, page.id, page.title)}
+                    title={`Delete "${page.title || 'Untitled'}"`}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-muted, #64748b)',
+                      cursor: 'pointer',
+                      padding: '3px',
+                      borderRadius: 4,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.12s ease',
+                      flexShrink: 0,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = '#f87171';
+                      e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = 'var(--text-muted, #64748b)';
+                      e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               );
             })}
 
@@ -1197,7 +1314,7 @@ export default function Sidebar() {
               </button>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-                {activeWorkspace?.icon && activeWorkspace.icon !== '🏢' ? (
+                {activeWorkspace?.icon && activeWorkspace.icon !== '🏢' && activeWorkspace.icon !== '⚡' && activeWorkspace.icon !== 'notiq' ? (
                   <span style={{ fontSize: 16, flexShrink: 0 }}>{activeWorkspace.icon}</span>
                 ) : (
                   <img src="/icon.svg" alt="Notiq" style={{ width: 20, height: 20, borderRadius: 5, flexShrink: 0 }} />

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { pageApi } from '@/lib/api';
 import Link from 'next/link';
+import { Trash2 } from 'lucide-react';
 
 interface Page {
   id: string;
@@ -156,24 +157,80 @@ export default function PagesListPage() {
       }
     } catch {}
 
-    // 3. Ensure the JavaScript Hoisting guide is always seeded!
-    if (!allPages.some(p => p.id === DEFAULT_HOISTING_PAGE.id || p.title.toLowerCase().includes('hoisting'))) {
-      allPages.unshift(DEFAULT_HOISTING_PAGE as Page);
-      try {
+    // 3. Filter out deleted pages and seed Hoisting guide ONLY if never deleted
+    try {
+      const deletedRaw = typeof window !== 'undefined' ? localStorage.getItem('notiq_deleted_pages') : null;
+      const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
+      allPages = allPages.filter(p => !deletedIds.includes(p.id));
+
+      if (!deletedIds.includes(DEFAULT_HOISTING_PAGE.id) && !allPages.some(p => p.id === DEFAULT_HOISTING_PAGE.id || p.title.toLowerCase().includes('hoisting'))) {
+        allPages.unshift(DEFAULT_HOISTING_PAGE as Page);
         const raw = typeof window !== 'undefined' ? localStorage.getItem('notiq_pages') : null;
         const list = raw ? JSON.parse(raw) : [];
         if (!list.some((p: any) => p.id === DEFAULT_HOISTING_PAGE.id)) {
           list.unshift(DEFAULT_HOISTING_PAGE);
           localStorage.setItem('notiq_pages', JSON.stringify(list));
         }
-      } catch {}
-    }
+      }
+    } catch {}
 
     setPages(allPages);
     setLoading(false);
   }, [activeWorkspace]);
 
-  useEffect(() => { fetchPages(); }, [fetchPages]);
+  useEffect(() => {
+    fetchPages();
+  }, [fetchPages]);
+
+  useEffect(() => {
+    const handlePageEvent = () => fetchPages();
+    window.addEventListener('notiq:page-created', handlePageEvent);
+    window.addEventListener('notiq:page-deleted', handlePageEvent);
+    return () => {
+      window.removeEventListener('notiq:page-created', handlePageEvent);
+      window.removeEventListener('notiq:page-deleted', handlePageEvent);
+    };
+  }, [fetchPages]);
+
+  const deletePage = async (e: React.MouseEvent, pageId: string, pageTitle: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!confirm(`Are you sure you want to delete "${pageTitle || 'Untitled'}"?`)) {
+      return;
+    }
+
+    // 1. Immediately remove from local state
+    setPages(prev => prev.filter(p => p.id !== pageId));
+
+    // 2. Track in notiq_deleted_pages so it never resurrects
+    try {
+      const deletedRaw = typeof window !== 'undefined' ? localStorage.getItem('notiq_deleted_pages') : null;
+      const deletedIds: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
+      if (!deletedIds.includes(pageId)) {
+        deletedIds.push(pageId);
+        localStorage.setItem('notiq_deleted_pages', JSON.stringify(deletedIds));
+      }
+    } catch {}
+
+    // 3. Remove from notiq_pages in localStorage
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('notiq_pages') : null;
+      if (raw) {
+        const list = JSON.parse(raw).filter((p: any) => p.id !== pageId);
+        localStorage.setItem('notiq_pages', JSON.stringify(list));
+      }
+    } catch {}
+
+    // 4. Call backend API
+    try {
+      await pageApi.delete(pageId);
+    } catch {}
+
+    // 5. Notify Sidebar and components
+    window.dispatchEvent(new CustomEvent('notiq:page-deleted', { detail: { id: pageId } }));
+    window.dispatchEvent(new CustomEvent('notiq:page-created'));
+  };
 
   const createPage = async () => {
     setCreating(true);
@@ -202,6 +259,7 @@ export default function PagesListPage() {
       const list = raw ? JSON.parse(raw) : [];
       list.unshift(newPageObj);
       localStorage.setItem('notiq_pages', JSON.stringify(list));
+      window.dispatchEvent(new CustomEvent('notiq:page-created'));
     } catch {}
 
     window.location.href = `/workspace/pages/${newPageObj.id}`;
@@ -214,15 +272,28 @@ export default function PagesListPage() {
           <h1 style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>📄 Pages</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>{pages.length} page{pages.length !== 1 ? 's' : ''}</p>
         </div>
-        <button onClick={createPage} disabled={creating}
-          style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+        <button
+          onClick={createPage}
+          disabled={creating}
+          style={{
+            background: 'var(--accent)',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            padding: '9px 18px',
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'opacity 0.15s ease',
+          }}
+        >
           {creating ? 'Creating…' : '+ New Page'}
         </button>
       </div>
 
       {loading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-          {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 120 }} />)}
+          {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 120, borderRadius: 'var(--radius)' }} />)}
         </div>
       ) : pages.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '80px 0', color: 'var(--text-muted)' }}>
@@ -234,22 +305,67 @@ export default function PagesListPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
           {pages.map(page => (
             <Link key={page.id} href={`/workspace/pages/${page.id}`} style={{ textDecoration: 'none' }}>
-              <div style={{
-                background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                padding: '20px', cursor: 'pointer', transition: 'border-color 0.15s, transform 0.15s', height: 120,
-                display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-              }}
-                onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent)'; (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)'; }}
+              <div
+                style={{
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)',
+                  padding: '18px 20px',
+                  cursor: 'pointer',
+                  transition: 'border-color 0.15s, transform 0.15s, box-shadow 0.15s',
+                  height: 126,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  position: 'relative',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent)';
+                  (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)';
+                  (e.currentTarget as HTMLDivElement).style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.3)';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)';
+                  (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
+                  (e.currentTarget as HTMLDivElement).style.boxShadow = 'none';
+                }}
               >
                 <div>
-                  <div style={{ fontSize: 24, marginBottom: 8 }}>{page.icon || '📄'}</div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 24, lineHeight: 1 }}>{page.icon || '📄'}</span>
+                    <button
+                      onClick={(e) => deletePage(e, page.id, page.title)}
+                      title={`Delete "${page.title || 'Untitled'}"`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--text-muted, #64748b)',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        borderRadius: 6,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = '#f87171';
+                        e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = 'var(--text-muted, #64748b)';
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                   <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {page.title || 'Untitled'}
                   </div>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {new Date(page.updatedAt).toLocaleDateString()}
+                  {page.updatedAt ? new Date(page.updatedAt).toLocaleDateString() : 'Just now'}
                 </div>
               </div>
             </Link>

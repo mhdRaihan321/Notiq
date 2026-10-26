@@ -198,8 +198,15 @@ function PageDetailPageInner() {
       if (raw) {
         const list = JSON.parse(raw).filter((p: any) => p.id !== pageId);
         localStorage.setItem('notiq_pages', JSON.stringify(list));
-        window.dispatchEvent(new CustomEvent('notiq:page-created'));
       }
+      const deletedRaw = localStorage.getItem('notiq_deleted_pages');
+      const deletedList = deletedRaw ? JSON.parse(deletedRaw) : [];
+      if (!deletedList.includes(pageId)) {
+        deletedList.push(pageId);
+        localStorage.setItem('notiq_deleted_pages', JSON.stringify(deletedList));
+      }
+      window.dispatchEvent(new CustomEvent('notiq:page-deleted', { detail: { id: pageId } }));
+      window.dispatchEvent(new CustomEvent('notiq:page-created'));
     } catch {}
     router.replace('/workspace/pages');
   };
