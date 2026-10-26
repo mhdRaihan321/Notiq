@@ -69,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const defaultWs: Workspace = {
             id: `ws-${bUser.studentId || 'brototype'}`,
             name: shortWsName,
-            icon: '⚡',
+            icon: 'notiq',
             description: `${bUser.batchName || ''} • ${bUser.domainName || ''}`,
           };
           setWorkspaces([defaultWs]);
@@ -172,7 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const defaultWs: Workspace = {
       id: `ws-${bUser.studentId || 'brototype'}`,
       name: shortWsName,
-      icon: '⚡',
+      icon: 'notiq',
       description: `${bUser.batchName || ''} • ${bUser.domainName || ''}`,
     };
     setWorkspaces([defaultWs]);
