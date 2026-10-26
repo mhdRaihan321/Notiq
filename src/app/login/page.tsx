@@ -30,11 +30,6 @@ export default function LoginPage() {
     }
   };
 
-  const fillDemo = () => {
-    setEmail('demo@notiq.com');
-    setPassword('demo1234');
-  };
-
   return (
     <div
       suppressHydrationWarning
@@ -231,34 +226,6 @@ export default function LoginPage() {
             {loading ? 'Signing in…' : 'Sign in to Workspace →'}
           </button>
         </form>
-
-        {/* Demo Account Helper */}
-        <div style={{ marginTop: 14, textAlign: 'center' }}>
-          <button
-            type="button"
-            onClick={fillDemo}
-            style={{
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px dashed rgba(255, 255, 255, 0.16)',
-              borderRadius: 7,
-              color: 'var(--text-muted, #94a3b8)',
-              fontSize: 12,
-              padding: '5px 10px',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'var(--accent, #7c6af7)';
-              e.currentTarget.style.color = '#fff';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.16)';
-              e.currentTarget.style.color = 'var(--text-muted, #94a3b8)';
-            }}
-          >
-            ⚡ Auto-fill Demo Credentials
-          </button>
-        </div>
 
         {/* Divider */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '22px 0 16px' }}>
