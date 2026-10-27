@@ -82,13 +82,21 @@ export default function TaskQuizModal({
       const subtopics = todo.subItems?.map((s) => s.text) || [];
       generateQuizForTopic(todo.title, subtopics)
         .then((qs) => {
+          if (qs.length === 0) {
+            // Non-study task or AI failed — auto-pass without quiz
+            onPass(10);
+            onClose();
+            return;
+          }
           setQuestions(qs);
           if (onUpdateQuestions) {
             onUpdateQuestions(todo.id, qs);
           }
         })
         .catch(() => {
-          // Fallback handled in aiService
+          // Total failure — let user complete without quiz
+          onPass(10);
+          onClose();
         })
         .finally(() => {
           setLoadingQuestions(false);
