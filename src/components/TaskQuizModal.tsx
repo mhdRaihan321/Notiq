@@ -16,6 +16,8 @@ import {
   AlertTriangle,
   AlertCircle,
   Lightbulb,
+  Copy,
+  Code2,
 } from 'lucide-react';
 import {
   QuizQuestion,
@@ -24,6 +26,258 @@ import {
   generateRelearnPlan,
   isQuizzableTopic,
 } from '@/lib/aiService';
+
+interface TextSegment {
+  type: 'text' | 'code_block';
+  content?: string;
+  code?: string;
+  language?: string;
+}
+
+function parseFormattedSegments(text: string): TextSegment[] {
+  if (!text) return [];
+
+  // 1. If text already has markdown code fences ```lang ... ```
+  if (text.includes('```')) {
+    const segments: TextSegment[] = [];
+    const codeBlockRegex = /```([a-zA-Z0-9_-]*)\s*\n?([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = codeBlockRegex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        const textBefore = text.slice(lastIndex, match.index);
+        if (textBefore.trim()) {
+          segments.push({ type: 'text', content: textBefore });
+        }
+      }
+      segments.push({
+        type: 'code_block',
+        language: match[1]?.trim() || 'code',
+        code: match[2]?.trimEnd() || '',
+      });
+      lastIndex = codeBlockRegex.lastIndex;
+    }
+
+    if (lastIndex < text.length) {
+      const remaining = text.slice(lastIndex);
+      if (remaining.trim()) {
+        segments.push({ type: 'text', content: remaining });
+      }
+    }
+    return segments;
+  }
+
+  // 2. Auto-detect unfenced HTML tag pairs like <form>...</form>, <table>...</table>, etc.
+  const htmlTagPairRegex = /(<(?:form|div|table|ul|ol|select|header|nav|section|style|script|main|article|button|input|h[1-6]|p)[^>]*>[\s\S]*?<\/(?:form|div|table|ul|ol|select|header|nav|section|style|script|main|article|button|input|h[1-6]|p)>)/i;
+  let match = text.match(htmlTagPairRegex);
+  if (match && match.index !== undefined) {
+    const before = text.slice(0, match.index).trim();
+    const code = match[0].trim();
+    const after = text.slice(match.index + match[0].length).trim();
+    const res: TextSegment[] = [];
+    if (before) res.push({ type: 'text', content: before });
+    res.push({ type: 'code_block', language: 'html', code });
+    if (after) res.push(...parseFormattedSegments(after));
+    return res;
+  }
+
+  // 3. Auto-detect unfenced CSS rule: selector { prop: val; }
+  const cssRuleRegex = /([.#a-zA-Z0-9_\-\s,:]+\s*\{\s*[a-zA-Z\-]+\s*:[^}]+\})/i;
+  match = text.match(cssRuleRegex);
+  if (match && match.index !== undefined) {
+    const before = text.slice(0, match.index).trim();
+    const code = match[0].trim();
+    const after = text.slice(match.index + match[0].length).trim();
+    const res: TextSegment[] = [];
+    if (before) res.push({ type: 'text', content: before });
+    res.push({ type: 'code_block', language: 'css', code });
+    if (after) res.push(...parseFormattedSegments(after));
+    return res;
+  }
+
+  return [{ type: 'text', content: text }];
+}
+
+function FormattedCodeBlock({ code, language }: { code: string; language?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (typeof navigator !== 'undefined') {
+      navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        margin: '14px 0',
+        borderRadius: 10,
+        background: '#090d16',
+        border: '1px solid rgba(255, 255, 255, 0.14)',
+        overflow: 'hidden',
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.45)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '7px 14px',
+          background: 'rgba(255, 255, 255, 0.04)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          fontSize: 11,
+          fontWeight: 700,
+          color: '#38bdf8',
+          letterSpacing: '0.6px',
+          textTransform: 'uppercase',
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Code2 size={13} color="#38bdf8" />
+          <span>{language || 'code'}</span>
+        </span>
+        <button
+          onClick={handleCopy}
+          type="button"
+          style={{
+            background: 'none',
+            border: 'none',
+            color: copied ? '#34d399' : '#a1a1aa',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer',
+            padding: '2px 8px',
+            borderRadius: 4,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            transition: 'color 0.15s',
+          }}
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          <span>{copied ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
+
+      <pre
+        style={{
+          margin: 0,
+          padding: '14px 16px',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+          fontSize: 13,
+          lineHeight: 1.55,
+          color: '#f1f5f9',
+          overflowX: 'auto',
+          whiteSpace: 'pre',
+        }}
+      >
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+function InlineTextWithCode({ text }: { text: string }) {
+  if (!text) return null;
+
+  const parts = text.split(/(`[^`]+`)/g);
+
+  return (
+    <>
+      {parts.map((part, idx) => {
+        if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+          const innerCode = part.slice(1, -1);
+          return (
+            <code
+              key={idx}
+              style={{
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                fontSize: '0.88em',
+                padding: '2px 6px',
+                borderRadius: 5,
+                background: 'rgba(124, 58, 237, 0.16)',
+                border: '1px solid rgba(124, 58, 237, 0.32)',
+                color: '#c4b5fd',
+                wordBreak: 'break-word',
+              }}
+            >
+              {innerCode}
+            </code>
+          );
+        }
+        return <span key={idx}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+function FormattedQuizQuestion({ text, fontSize = 16.5 }: { text: string; fontSize?: number }) {
+  const segments = parseFormattedSegments(text);
+
+  return (
+    <div>
+      {segments.map((seg, idx) => {
+        if (seg.type === 'code_block' && seg.code) {
+          return <FormattedCodeBlock key={idx} code={seg.code} language={seg.language} />;
+        }
+        return (
+          <div
+            key={idx}
+            style={{
+              fontSize,
+              fontWeight: 700,
+              color: '#ffffff',
+              lineHeight: 1.5,
+              marginBottom: 8,
+              whiteSpace: 'pre-line',
+            }}
+          >
+            <InlineTextWithCode text={seg.content || ''} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FormattedOptionText({ text }: { text: string }) {
+  if (!text) return null;
+
+  if (text.includes('`')) {
+    return <InlineTextWithCode text={text} />;
+  }
+
+  const isLikelyCode =
+    (text.trim().startsWith('<') && text.trim().endsWith('>')) ||
+    /^(const|let|var|function|return|import|export|console\.|document\.)\b/.test(text.trim()) ||
+    /^[a-zA-Z-]+\s*:\s*[^;]+;?$/.test(text.trim());
+
+  if (isLikelyCode) {
+    return (
+      <code
+        style={{
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+          fontSize: '0.92em',
+          padding: '2px 7px',
+          borderRadius: 5,
+          background: 'rgba(56, 189, 248, 0.12)',
+          border: '1px solid rgba(56, 189, 248, 0.28)',
+          color: '#7dd3fc',
+          wordBreak: 'break-word',
+        }}
+      >
+        {text}
+      </code>
+    );
+  }
+
+  return <span>{text}</span>;
+}
 
 interface TaskQuizModalProps {
   isOpen: boolean;
@@ -749,10 +1003,13 @@ export default function TaskQuizModal({
                           padding: '16px 20px',
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: '#fff', lineHeight: 1.45 }}>
-                            {idx + 1}. {q.question}
-                          </span>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#a1a1aa', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>
+                              Question {idx + 1}
+                            </div>
+                            <FormattedQuizQuestion text={q.question} fontSize={14} />
+                          </div>
                           <span
                             style={{
                               fontSize: 11,
@@ -768,7 +1025,7 @@ export default function TaskQuizModal({
                           </span>
                         </div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
                           {q.options.map((opt, oIdx) => {
                             const isSelected = userAns === oIdx;
                             const isAnswer = q.correctAnswer === oIdx;
@@ -806,7 +1063,9 @@ export default function TaskQuizModal({
                                 <span style={{ fontWeight: 700, opacity: 0.7 }}>
                                   {String.fromCharCode(65 + oIdx)}.
                                 </span>
-                                <span style={{ flex: 1 }}>{opt}</span>
+                                <span style={{ flex: 1 }}>
+                                  <FormattedOptionText text={opt} />
+                                </span>
                                 {isAnswer && <CheckCircle2 size={15} color="#34d399" />}
                                 {isSelected && !isAnswer && <XCircle size={15} color="#f87171" />}
                               </div>
@@ -816,15 +1075,17 @@ export default function TaskQuizModal({
 
                         <div
                           style={{
-                            fontSize: 12,
+                            fontSize: 12.5,
                             color: '#a1a1aa',
                             background: 'rgba(0, 0, 0, 0.25)',
-                            padding: '8px 12px',
-                            borderRadius: 6,
-                            lineHeight: 1.45,
+                            padding: '10px 14px',
+                            borderRadius: 8,
+                            lineHeight: 1.5,
+                            border: '1px solid rgba(255, 255, 255, 0.06)',
                           }}
                         >
-                          <strong style={{ color: '#fff' }}>Explanation:</strong> {q.explanation}
+                          <strong style={{ color: '#fff', marginRight: 4 }}>Explanation:</strong>
+                          <InlineTextWithCode text={q.explanation} />
                         </div>
                       </div>
                     );
@@ -934,17 +1195,9 @@ export default function TaskQuizModal({
                     )}
 
                     {/* Question text */}
-                    <h4
-                      style={{
-                        margin: '0 0 20px',
-                        fontSize: 17,
-                        fontWeight: 700,
-                        color: '#ffffff',
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      {currentQ.question}
-                    </h4>
+                    <div style={{ marginBottom: 20 }}>
+                      <FormattedQuizQuestion text={currentQ.question} fontSize={16.5} />
+                    </div>
 
                     {/* 4 Options */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1010,7 +1263,9 @@ export default function TaskQuizModal({
                             >
                               {String.fromCharCode(65 + optIdx)}
                             </span>
-                            <span style={{ flex: 1, lineHeight: 1.45 }}>{optText}</span>
+                            <span style={{ flex: 1, lineHeight: 1.45 }}>
+                              <FormattedOptionText text={optText} />
+                            </span>
                             {isSelected && (
                               <span
                                 style={{
