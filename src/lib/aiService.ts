@@ -408,6 +408,28 @@ export async function generateQuizForTopic(
     return [];
   }
 
+  // 1. Primary: Use Next.js internal server-side API route (/api/ai/quiz)
+  // This avoids CORS issues, browser adblockers, and leverages server-side keys
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetch('/api/ai/quiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, subtopics }),
+        signal: AbortSignal.timeout(20000),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.questions) && data.questions.length >= 5) {
+          return data.questions;
+        }
+      }
+    } catch (err) {
+      console.warn('/api/ai/quiz fetch error, falling back to direct API call:', err);
+    }
+  }
+
   const subsList = Array.isArray(subtopics)
     ? subtopics.join('\n- ')
     : subtopics;
