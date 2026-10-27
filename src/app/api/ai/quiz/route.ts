@@ -85,25 +85,33 @@ Generate exactly 10 multiple-choice questions (MCQs). Follow ALL these rules str
 4. Each question must be self-contained and make sense on its own.
 5. NEVER ask vague questions like "which statement best describes X?" — ask about specific behavior, output, or scenarios.
 
+## CODE FORMATTING RULES (CRITICAL):
+6. Whenever a question contains code (HTML, CSS, JavaScript, etc.), ALWAYS format the code inside a fenced markdown code block with language identifier (\`\`\`html, \`\`\`css, \`\`\`javascript, etc.), with clean indentation and newlines.
+   Example:
+   "question": "Examine the following HTML form snippet:\\n\\n\`\`\`html\\n<form>\\n  <label for=\\"username\\">Username</label>\\n  <input type=\\"text\\" id=\\"username\\" name=\\"user\\">\\n</form>\\n\`\`\`\\n\\nWhat is the browser behavior when a user clicks directly on the text label \\"Username\\"?"
+   NEVER merge code snippets into a single unformatted run-on sentence.
+7. If an option contains code, HTML tags, attributes, CSS properties, or JS methods (e.g. \`<label>\`, \`<input type="text">\`, \`display: flex;\`, \`e.preventDefault()\`), wrap the code in backticks (\`code\`) so it renders cleanly as code.
+8. In explanations, always wrap referenced tags, variables, and code in backticks.
+
 ## OPTION QUALITY RULES:
-6. All 4 options MUST be plausible and distinct from each other. NEVER use obviously wrong fillers.
-7. Options should be roughly similar in length and style — don't make the correct answer obviously longer or more detailed.
-8. NO two questions may share the same set of options.
+9. All 4 options MUST be plausible and distinct from each other. NEVER use obviously wrong fillers.
+10. Options should be roughly similar in length and style — don't make the correct answer obviously longer or more detailed.
+11. NO two questions may share the same set of options.
 
 ## ANSWER DISTRIBUTION RULES:
-9. The correct answers MUST be distributed across indices 0, 1, 2, and 3.
+12. The correct answers MUST be distributed across indices 0, 1, 2, and 3.
    - At least 2 questions with correctAnswer=0, at least 2 with correctAnswer=1, at least 2 with correctAnswer=2, at least 2 with correctAnswer=3.
    - NEVER make all or most correct answers the same index.
 
 ## FORMAT:
-Return ONLY a valid JSON array, no markdown fences, no explanation text before or after:
+Return ONLY a valid JSON array, no markdown fences around the JSON itself, no explanation text before or after:
 [
   {
     "id": "q1",
-    "question": "What will be the output of the following code?\\n\\nconst x = [1, 2, 3];\\nconsole.log(x.map(n => n * 2));",
-    "options": ["[2, 4, 6]", "[1, 2, 3]", "undefined", "TypeError"],
+    "question": "What will be the output of the following code?\\n\\n\`\`\`javascript\\nconst x = [1, 2, 3];\\nconsole.log(x.map(n => n * 2));\\n\`\`\`",
+    "options": ["\`[2, 4, 6]\`", "\`[1, 2, 3]\`", "\`undefined\`", "\`TypeError\`"],
     "correctAnswer": 0,
-    "explanation": "Array.map() creates a new array by applying the callback to each element. n * 2 doubles each value, producing [2, 4, 6].",
+    "explanation": "Array.map() creates a new array by applying the callback to each element. \`n * 2\` doubles each value, producing \`[2, 4, 6]\`.",
     "subtopic": "Array.map()"
   }
 ]
@@ -129,7 +137,7 @@ IMPORTANT: Return ONLY the JSON array. No other text.`;
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(30000),
         });
 
         if (!response.ok) {
