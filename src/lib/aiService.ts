@@ -284,120 +284,215 @@ export interface WrongQuestionDetail {
 }
 
 /**
- * Generate 10 multiple choice questions to test understanding of a topic and its subtopics
+ * Determine if a task topic is actually quiz-worthy (study/technical/academic).
+ * Simple daily tasks like "go home", "buy groceries", "call mom" should NOT be quizzed.
+ */
+function isQuizzableTopic(title: string, subtopics: string[] | string): boolean {
+  const combined = `${title} ${Array.isArray(subtopics) ? subtopics.join(' ') : subtopics}`.toLowerCase();
+  
+  // Non-study keywords that indicate this is a personal/daily task, not a learning topic
+  const nonStudyPatterns = [
+    /^go\s+(home|out|to|back|shopping)/i,
+    /^(buy|purchase|order|pick\s+up)\s/i,
+    /^(call|text|message|email|reply|respond)\s/i,
+    /^(clean|wash|cook|eat|sleep|wake|rest|nap|shower)/i,
+    /^(pay|submit|send|deliver|drop\s+off)/i,
+    /^(meet|visit|attend|pick\s+up\s+kids)/i,
+    /^(exercise|gym|walk|run|jog|yoga)/i,
+    /^(watch|listen|relax|chill|break)/i,
+    /^(organize|tidy|arrange|pack|unpack)/i,
+    /^(book|schedule|cancel|reschedule)\s+(appointment|meeting|cab|ticket|flight)/i,
+    /^(remind|remember|don'?t\s+forget)/i,
+  ];
+
+  for (const pattern of nonStudyPatterns) {
+    if (pattern.test(title.trim())) return false;
+  }
+
+  // If subtopics exist and have technical-sounding content, it's likely quizzable
+  const techSignals = [
+    'function', 'method', 'class', 'array', 'object', 'loop', 'variable',
+    'api', 'database', 'server', 'client', 'component', 'module', 'hook',
+    'state', 'prop', 'render', 'route', 'query', 'mutation', 'schema',
+    'algorithm', 'data structure', 'pattern', 'protocol', 'framework',
+    'library', 'package', 'dependency', 'css', 'html', 'javascript',
+    'typescript', 'python', 'java', 'react', 'node', 'express', 'next',
+    'mongodb', 'sql', 'git', 'docker', 'aws', 'firebase', 'hosting',
+    'authentication', 'authorization', 'middleware', 'redux', 'context',
+    'promise', 'async', 'await', 'callback', 'event', 'dom', 'rest',
+    'graphql', 'websocket', 'testing', 'debugging', 'deploy', 'ci/cd',
+    'oop', 'inheritance', 'polymorphism', 'encapsulation', 'abstraction',
+    'closure', 'scope', 'hoisting', 'prototype', 'this', 'bind', 'apply',
+    'map', 'filter', 'reduce', 'spread', 'destructuring', 'template',
+    'interface', 'type', 'generic', 'enum', 'decorator', 'annotation',
+  ];
+
+  // If the title or subtopics contain ANY tech signal, it's quizzable
+  if (techSignals.some(s => combined.includes(s))) return true;
+
+  // If title is very short (1-3 words) and has no tech terms, probably not quizzable
+  const wordCount = title.trim().split(/\s+/).length;
+  if (wordCount <= 3 && !techSignals.some(s => combined.includes(s))) {
+    // Check if it looks like a personal task
+    const personalWords = ['home', 'food', 'shop', 'store', 'market', 'laundry', 'dishes', 'trash', 'bed', 'lunch', 'dinner', 'breakfast'];
+    if (personalWords.some(w => combined.includes(w))) return false;
+  }
+
+  // Default: assume it's quizzable (benefit of the doubt for study tasks)
+  return true;
+}
+
+/**
+ * Generate 10 multiple choice questions to test understanding of a topic and its subtopics.
+ * Returns empty array for non-study tasks (e.g. "go home", "buy milk").
  */
 export async function generateQuizForTopic(
   title: string,
   subtopics: string[] | string = []
 ): Promise<QuizQuestion[]> {
+  // Skip quiz for non-study / non-technical tasks
+  if (!isQuizzableTopic(title, subtopics)) {
+    return [];
+  }
+
   const subsList = Array.isArray(subtopics)
     ? subtopics.join('\n- ')
     : subtopics;
 
-  const prompt = `You are a senior technical interviewer and teacher.
-Generate exactly 10 comprehensive multiple-choice questions (MCQs) to evaluate a student on this topic:
-Topic: "${title}"
-Subtopics & Checklist Items:
+  const prompt = `You are a senior software engineering interviewer creating a mastery quiz.
+
+TOPIC: "${title}"
+SUBTOPICS/CHECKLIST:
 - ${subsList || 'General core concepts of ' + title}
 
-Requirements:
-1. Provide exactly 10 questions covering both theoretical understanding, code/syntax quirks, and real-world scenarios.
-2. Each question MUST have exactly 4 options.
-3. "correctAnswer" MUST be the 0-based integer index (0, 1, 2, or 3) of the correct choice.
-4. "explanation" MUST clearly explain why the correct option is right and the key takeaway.
-5. "subtopic" MUST be the relevant subtopic or concept name tested.
+Generate exactly 10 multiple-choice questions (MCQs). Follow ALL these rules strictly:
 
-Return ONLY a valid JSON array in this exact format:
+## QUESTION QUALITY RULES:
+1. Each question MUST test a SPECIFIC, DISTINCT concept — NO two questions should test the same thing.
+2. At least 4 questions MUST include a short code snippet or code output scenario. Use real code examples with actual syntax.
+3. Questions must be TRICKY but FAIR — they should require understanding, not just memorization.
+4. Each question must be self-contained and make sense on its own.
+5. NEVER ask vague questions like "which statement best describes X?" — ask about specific behavior, output, or scenarios.
+
+## OPTION QUALITY RULES:
+6. All 4 options MUST be plausible and distinct from each other. NEVER use obviously wrong fillers like "causes a syntax error in all versions" or "is deprecated and should never be used".
+7. Options should be roughly similar in length and style — don't make the correct answer obviously longer or more detailed.
+8. NO two questions may share the same set of options.
+
+## ANSWER DISTRIBUTION RULES:
+9. The correct answers MUST be distributed across indices 0, 1, 2, and 3. 
+   - Use this distribution: at least 2 questions with correctAnswer=0, at least 2 with correctAnswer=1, at least 2 with correctAnswer=2, at least 2 with correctAnswer=3.
+   - NEVER make all or most correct answers the same index.
+
+## FORMAT:
+Return ONLY a valid JSON array, no markdown fences, no explanation text before or after:
 [
   {
     "id": "q1",
-    "question": "What happens when ...?",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "question": "What will be the output of the following code?\\n\\nconst x = [1, 2, 3];\\nconsole.log(x.map(n => n * 2));",
+    "options": ["[2, 4, 6]", "[1, 2, 3]", "undefined", "TypeError"],
     "correctAnswer": 0,
-    "explanation": "Because...",
-    "subtopic": "..."
+    "explanation": "Array.map() creates a new array by applying the callback to each element. n * 2 doubles each value, producing [2, 4, 6].",
+    "subtopic": "Array.map()"
   }
-]`;
+]
+
+IMPORTANT: Return ONLY the JSON array. No other text.`;
 
   try {
     const res = await queryAI({ prompt });
     const text = res.text.trim();
     
-    // Extract JSON array
-    const jsonMatch = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
+    // Extract JSON array — handle both raw JSON and markdown-fenced responses
+    let jsonStr = text;
+    const fencedMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (fencedMatch) {
+      jsonStr = fencedMatch[1].trim();
+    }
+    
+    const jsonMatch = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       if (Array.isArray(parsed) && parsed.length > 0) {
         const validated: QuizQuestion[] = parsed.map((item, idx) => ({
           id: item.id || `q-${idx + 1}`,
-          question: String(item.question || `Question ${idx + 1} on ${title}`),
+          question: String(item.question || ''),
           options: Array.isArray(item.options) && item.options.length === 4
             ? item.options.map(String)
-            : ['Option A', 'Option B', 'Option C', 'Option D'],
+            : [],
           correctAnswer: typeof item.correctAnswer === 'number' && item.correctAnswer >= 0 && item.correctAnswer <= 3
             ? item.correctAnswer
             : 0,
           explanation: String(item.explanation || 'Review the topic concepts to understand this.'),
           subtopic: item.subtopic ? String(item.subtopic) : title,
-        }));
+        })).filter(q => q.question.length > 10 && q.options.length === 4);
 
-        if (validated.length >= 10) {
-          return validated.slice(0, 10);
+        if (validated.length > 0) {
+          // Post-processing: fix answer distribution if all answers cluster on one index
+          const finalQuestions = fixAnswerDistribution(validated);
+          
+          // Deduplicate questions with identical text
+          const seen = new Set<string>();
+          const unique = finalQuestions.filter(q => {
+            const key = q.question.toLowerCase().trim();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          
+          return unique.slice(0, 10);
         }
-        // If between 1 and 9, pad with fallback questions to reach 10
-        return padQuizQuestions(validated, title, subtopics);
       }
     }
   } catch (err) {
-    console.warn('AI Quiz generation failed, generating fallback quiz:', err);
+    console.warn('AI Quiz generation failed:', err);
   }
 
-  return padQuizQuestions([], title, subtopics);
+  // Return empty — the modal should handle this gracefully
+  return [];
 }
 
-function padQuizQuestions(
-  existing: QuizQuestion[],
-  title: string,
-  subtopics: string[] | string
-): QuizQuestion[] {
-  const subs = Array.isArray(subtopics)
-    ? subtopics.filter(Boolean)
-    : String(subtopics).split('\n').map(s => s.replace(/^[-*•\d.)\s]+/, '').trim()).filter(Boolean);
-
-  const needed = 10 - existing.length;
-  const generated: QuizQuestion[] = [...existing];
-
-  const genericConcepts = subs.length > 0 ? subs : [
-    'Core Fundamentals',
-    'Syntax & Execution Behavior',
-    'Best Practices',
-    'Common Pitfalls & Edge Cases',
-    'Practical Application',
-    'Performance & Optimization',
-    'Debugging & Troubleshooting',
-    'Integration & Patterns',
-    'Limitations & Gotchas',
-    'Standard Conventions',
-  ];
-
-  for (let i = 0; i < needed; i++) {
-    const concept = genericConcepts[i % genericConcepts.length] || `Concept ${i + 1}`;
-    generated.push({
-      id: `fallback-q-${existing.length + i + 1}`,
-      question: `In the context of ${title}, which statement best describes ${concept}?`,
-      options: [
-        `It is a fundamental principle in ${title} that should be understood thoroughly.`,
-        `It is deprecated and should never be used in modern development.`,
-        `It only works in browser environments and not in server runtimes.`,
-        `It causes a runtime syntax error in all modern versions.`,
-      ],
-      correctAnswer: 0,
-      explanation: `${concept} is a core aspect of ${title} and essential for writing clean, reliable code.`,
-      subtopic: concept,
-    });
-  }
-
-  return generated.slice(0, 10);
+/**
+ * Fix answer distribution: if too many correct answers are the same index,
+ * shuffle some by rotating options and updating correctAnswer.
+ */
+function fixAnswerDistribution(questions: QuizQuestion[]): QuizQuestion[] {
+  // Count how many times each correctAnswer index appears
+  const counts = [0, 0, 0, 0];
+  questions.forEach(q => counts[q.correctAnswer]++);
+  
+  // If any single index has more than 4 out of 10, redistribute
+  const maxAllowed = Math.ceil(questions.length / 2.5); // ~4
+  const overloaded = counts.findIndex(c => c > maxAllowed);
+  
+  if (overloaded === -1) return questions; // distribution is fine
+  
+  // Find which questions to redistribute
+  const targetIndices = [0, 1, 2, 3].filter(i => counts[i] < 2);
+  if (targetIndices.length === 0) return questions;
+  
+  let targetIdx = 0;
+  return questions.map((q, i) => {
+    if (q.correctAnswer !== overloaded || counts[overloaded] <= maxAllowed) return q;
+    
+    const newCorrectIdx = targetIndices[targetIdx % targetIndices.length];
+    targetIdx++;
+    
+    // Swap the options: put current correct answer at new position
+    const newOptions = [...q.options];
+    const correctOption = newOptions[q.correctAnswer];
+    newOptions[q.correctAnswer] = newOptions[newCorrectIdx];
+    newOptions[newCorrectIdx] = correctOption;
+    
+    counts[overloaded]--;
+    counts[newCorrectIdx]++;
+    
+    return {
+      ...q,
+      options: newOptions,
+      correctAnswer: newCorrectIdx,
+    };
+  });
 }
 
 /**
