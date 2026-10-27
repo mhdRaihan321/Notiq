@@ -21,10 +21,10 @@ const API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
 
 // Fast models ordered by low latency and high availability
 const FAST_MODELS = [
-  'gemini-3-flash-preview',
-  'gemini-3.1-flash-lite',
   'gemini-3.5-flash-lite',
-  'gemini-3.8-flash',
+  'gemini-flash-lite-latest',
+  'gemini-3.1-flash-lite',
+  'gemini-3-flash-preview',
 ];
 
 const SYSTEM_PROMPT = `You are Notiq AI, an intelligent, helpful workspace and productivity assistant integrated into Notiq (a modern Notion-like productivity platform).
@@ -216,11 +216,13 @@ export async function queryAI({ prompt, history = [], context = {}, signal }: AI
 
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
+      const timeoutSignal = AbortSignal.timeout(15000);
+      const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal,
+        signal: combinedSignal,
       });
 
       if (!res.ok) {
@@ -240,12 +242,60 @@ export async function queryAI({ prompt, history = [], context = {}, signal }: AI
         return { text };
       }
     } catch (err: any) {
-      if (err.name === 'AbortError' || signal?.aborted) throw err;
+      if (err.name === 'AbortError' && signal?.aborted) throw err;
       lastError = err;
     }
   }
 
   throw lastError || new Error('All AI models are currently busy. Please try again.');
+}
+
+/**
+ * Dedicated AI query for quiz generation — uses its OWN system prompt (not the Notiq assistant one).
+ * This prevents the model from getting confused between being a productivity assistant and a quiz generator.
+ */
+async function queryAIForQuiz(quizPrompt: string): Promise<string> {
+  const quizSystemPrompt = `You are an expert quiz generator. You ONLY output valid JSON arrays of quiz questions. You NEVER output explanatory text, greetings, markdown fences, or anything except a raw JSON array. Follow the user's formatting instructions exactly.`;
+
+  const payload = {
+    systemInstruction: { parts: [{ text: quizSystemPrompt }] },
+    contents: [{ role: 'user', parts: [{ text: quizPrompt }] }],
+    generationConfig: {
+      temperature: 0.7,
+      topP: 0.95,
+      maxOutputTokens: 4096,
+    },
+  };
+
+  let lastError: Error | null = null;
+
+  for (const model of FAST_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!res.ok) {
+        if ([503, 429, 404, 500].includes(res.status)) {
+          lastError = new Error(`Quiz model ${model} returned ${res.status}`);
+          continue;
+        }
+        throw new Error(`Gemini quiz API error ${res.status}`);
+      }
+
+      const data = await res.json();
+      const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join('\n') || '';
+      if (text.trim()) return text.trim();
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('All quiz models busy');
 }
 
 /**
@@ -287,58 +337,61 @@ export interface WrongQuestionDetail {
  * Determine if a task topic is actually quiz-worthy (study/technical/academic).
  * Simple daily tasks like "go home", "buy groceries", "call mom" should NOT be quizzed.
  */
-function isQuizzableTopic(title: string, subtopics: string[] | string): boolean {
+export function isQuizzableTopic(title: string, subtopics: string[] | string = []): boolean {
   const combined = `${title} ${Array.isArray(subtopics) ? subtopics.join(' ') : subtopics}`.toLowerCase();
-  
-  // Non-study keywords that indicate this is a personal/daily task, not a learning topic
-  const nonStudyPatterns = [
-    /^go\s+(home|out|to|back|shopping)/i,
-    /^(buy|purchase|order|pick\s+up)\s/i,
-    /^(call|text|message|email|reply|respond)\s/i,
-    /^(clean|wash|cook|eat|sleep|wake|rest|nap|shower)/i,
-    /^(pay|submit|send|deliver|drop\s+off)/i,
-    /^(meet|visit|attend|pick\s+up\s+kids)/i,
-    /^(exercise|gym|walk|run|jog|yoga)/i,
-    /^(watch|listen|relax|chill|break)/i,
-    /^(organize|tidy|arrange|pack|unpack)/i,
-    /^(book|schedule|cancel|reschedule)\s+(appointment|meeting|cab|ticket|flight)/i,
-    /^(remind|remember|don'?t\s+forget)/i,
-  ];
 
-  for (const pattern of nonStudyPatterns) {
-    if (pattern.test(title.trim())) return false;
-  }
-
-  // If subtopics exist and have technical-sounding content, it's likely quizzable
-  const techSignals = [
+  // Explicit study / technical signals — if present, ALWAYS quizzable
+  const studySignals = [
+    'learn', 'study', 'review', 'read', 'understand', 'practice', 'master',
+    'chapter', 'tutorial', 'course', 'lecture', 'exam', 'test', 'dsa', 'leetcode',
     'function', 'method', 'class', 'array', 'object', 'loop', 'variable',
     'api', 'database', 'server', 'client', 'component', 'module', 'hook',
     'state', 'prop', 'render', 'route', 'query', 'mutation', 'schema',
     'algorithm', 'data structure', 'pattern', 'protocol', 'framework',
-    'library', 'package', 'dependency', 'css', 'html', 'javascript',
+    'library', 'package', 'dependency', 'css', 'html', 'javascript', 'js', 'ts',
     'typescript', 'python', 'java', 'react', 'node', 'express', 'next',
     'mongodb', 'sql', 'git', 'docker', 'aws', 'firebase', 'hosting',
-    'authentication', 'authorization', 'middleware', 'redux', 'context',
+    'authentication', 'auth', 'middleware', 'redux', 'context',
     'promise', 'async', 'await', 'callback', 'event', 'dom', 'rest',
     'graphql', 'websocket', 'testing', 'debugging', 'deploy', 'ci/cd',
     'oop', 'inheritance', 'polymorphism', 'encapsulation', 'abstraction',
     'closure', 'scope', 'hoisting', 'prototype', 'this', 'bind', 'apply',
     'map', 'filter', 'reduce', 'spread', 'destructuring', 'template',
     'interface', 'type', 'generic', 'enum', 'decorator', 'annotation',
+    'frontend', 'backend', 'fullstack', 'specificity', 'flexbox', 'grid',
+    'cascade', 'selector', 'pseudoclass', 'element', 'attribute', 'semantic'
   ];
 
-  // If the title or subtopics contain ANY tech signal, it's quizzable
-  if (techSignals.some(s => combined.includes(s))) return true;
+  if (studySignals.some((s) => combined.includes(s))) return true;
 
-  // If title is very short (1-3 words) and has no tech terms, probably not quizzable
-  const wordCount = title.trim().split(/\s+/).length;
-  if (wordCount <= 3 && !techSignals.some(s => combined.includes(s))) {
-    // Check if it looks like a personal task
-    const personalWords = ['home', 'food', 'shop', 'store', 'market', 'laundry', 'dishes', 'trash', 'bed', 'lunch', 'dinner', 'breakfast'];
-    if (personalWords.some(w => combined.includes(w))) return false;
+  // Non-study patterns indicating personal/daily/routine actions
+  const nonStudyPatterns = [
+    /^go\s+(home|out|to|back|shopping)/i,
+    /^(buy|purchase|order|pick\s*up|get)\s/i,
+    /^(call|text|message|email|reply|respond|contact)\s/i,
+    /^(clean|wash|cook|eat|sleep|wake|rest|nap|shower|brush)/i,
+    /^(pay|submit|send|deliver|drop\s*off)\s/i,
+    /^(meet|visit|attend|hang\s*out)/i,
+    /^(exercise|gym|walk|run|jog|yoga|workout)/i,
+    /^(watch|listen|relax|chill|play|break)/i,
+    /^(organize|tidy|arrange|pack|unpack)/i,
+    /^(book|schedule|cancel|reschedule)\s+(appointment|meeting|cab|ticket|flight|doctor)/i,
+    /^(remind|remember|don'?t\s+forget)/i,
+    /^(doctor|dentist|grocery|groceries|laundry|dishes|dinner|lunch|breakfast|haircut)$/i,
+    /^go\s*home$/i,
+  ];
+
+  for (const pattern of nonStudyPatterns) {
+    if (pattern.test(title.trim())) return false;
   }
 
-  // Default: assume it's quizzable (benefit of the doubt for study tasks)
+  // Short casual tasks with common personal words
+  const personalWords = ['home', 'food', 'shop', 'store', 'market', 'laundry', 'dishes', 'trash', 'bed', 'lunch', 'dinner', 'breakfast', 'gym', 'workout'];
+  const words = title.trim().split(/\s+/);
+  if (words.length <= 3 && personalWords.some((w) => combined.includes(w))) {
+    return false;
+  }
+
   return true;
 }
 
@@ -399,56 +452,58 @@ Return ONLY a valid JSON array, no markdown fences, no explanation text before o
 
 IMPORTANT: Return ONLY the JSON array. No other text.`;
 
-  try {
-    const res = await queryAI({ prompt });
-    const text = res.text.trim();
-    
-    // Extract JSON array — handle both raw JSON and markdown-fenced responses
-    let jsonStr = text;
-    const fencedMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    if (fencedMatch) {
-      jsonStr = fencedMatch[1].trim();
-    }
-    
-    const jsonMatch = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const validated: QuizQuestion[] = parsed.map((item, idx) => ({
-          id: item.id || `q-${idx + 1}`,
-          question: String(item.question || ''),
-          options: Array.isArray(item.options) && item.options.length === 4
-            ? item.options.map(String)
-            : [],
-          correctAnswer: typeof item.correctAnswer === 'number' && item.correctAnswer >= 0 && item.correctAnswer <= 3
-            ? item.correctAnswer
-            : 0,
-          explanation: String(item.explanation || 'Review the topic concepts to understand this.'),
-          subtopic: item.subtopic ? String(item.subtopic) : title,
-        })).filter(q => q.question.length > 10 && q.options.length === 4);
+  // Try up to 2 attempts
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const text = await queryAIForQuiz(prompt);
+      
+      // Extract JSON array — handle both raw JSON and markdown-fenced responses
+      let jsonStr = text;
+      const fencedMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+      if (fencedMatch) {
+        jsonStr = fencedMatch[1].trim();
+      }
+      
+      const jsonMatch = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const validated: QuizQuestion[] = parsed.map((item, idx) => ({
+            id: item.id || `q-${idx + 1}`,
+            question: String(item.question || ''),
+            options: Array.isArray(item.options) && item.options.length === 4
+              ? item.options.map(String)
+              : [],
+            correctAnswer: typeof item.correctAnswer === 'number' && item.correctAnswer >= 0 && item.correctAnswer <= 3
+              ? item.correctAnswer
+              : 0,
+            explanation: String(item.explanation || 'Review the topic concepts to understand this.'),
+            subtopic: item.subtopic ? String(item.subtopic) : title,
+          })).filter(q => q.question.length > 10 && q.options.length === 4);
 
-        if (validated.length > 0) {
-          // Post-processing: fix answer distribution if all answers cluster on one index
-          const finalQuestions = fixAnswerDistribution(validated);
-          
-          // Deduplicate questions with identical text
-          const seen = new Set<string>();
-          const unique = finalQuestions.filter(q => {
-            const key = q.question.toLowerCase().trim();
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-          
-          return unique.slice(0, 10);
+          if (validated.length >= 5) {
+            // Post-processing: fix answer distribution if all answers cluster on one index
+            const finalQuestions = fixAnswerDistribution(validated);
+            
+            // Deduplicate questions with identical text
+            const seen = new Set<string>();
+            const unique = finalQuestions.filter(q => {
+              const key = q.question.toLowerCase().trim();
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+            
+            return unique.slice(0, 10);
+          }
         }
       }
+    } catch (err) {
+      console.warn(`AI Quiz generation attempt ${attempt + 1} failed:`, err);
     }
-  } catch (err) {
-    console.warn('AI Quiz generation failed:', err);
   }
 
-  // Return empty — the modal should handle this gracefully
+  // Return empty — the modal will show retry option
   return [];
 }
 

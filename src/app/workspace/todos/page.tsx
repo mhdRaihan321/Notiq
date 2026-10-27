@@ -13,7 +13,7 @@ import {
   SubItem,
 } from '@/lib/brototypeApi';
 import BrototypeModal from '@/components/BrototypeModal';
-import { generateLearningNotesForTask, generateQuizForTopic, QuizQuestion } from '@/lib/aiService';
+import { generateLearningNotesForTask, generateQuizForTopic, QuizQuestion, isQuizzableTopic } from '@/lib/aiService';
 import TaskQuizModal from '@/components/TaskQuizModal';
 import TaskDetailSideMenu, { getTaskIcon } from '@/components/TaskDetailSideMenu';
 
@@ -342,6 +342,16 @@ function TodosPageInner() {
         const allCompleted = newSubs.length > 0 && newSubs.every((s) => s.completed);
 
         if (allCompleted && t.status !== 'done') {
+          // If non-study task, complete directly without quiz
+          if (!isQuizzableTopic(t.title, newSubs.map((s) => s.text))) {
+            todoApi.update(t.id, { status: 'done', subItems: newSubs }).catch(() => {});
+            return {
+              ...t,
+              status: 'done',
+              subItems: newSubs,
+            };
+          }
+
           triggeredDoneTodo = { ...t, subItems: newSubs };
           // Don't auto-set to done until quiz is passed
           return {
@@ -352,7 +362,9 @@ function TodosPageInner() {
 
         const nextStatus: Todo['status'] = t.status === 'done' && !allCompleted ? 'in_progress' : t.status;
         if (nextStatus !== t.status) {
-          todoApi.update(t.id, { status: nextStatus }).catch(() => {});
+          todoApi.update(t.id, { status: nextStatus, subItems: newSubs }).catch(() => {});
+        } else {
+          todoApi.update(t.id, { subItems: newSubs }).catch(() => {});
         }
 
         return {
@@ -372,56 +384,91 @@ function TodosPageInner() {
     });
   };
 
-  const handleChangePriority = async (todoId: string, newPriority: Todo['priority']) => {
+  const handleChangePriority = (todoId: string, newPriority: Todo['priority']) => {
     setPriorityMenuId(null);
-    try {
-      await todoApi.update(todoId, { priority: newPriority }).catch(() => {});
-    } catch { /* */ }
-
     setTodos((prev) => {
       const updated: Todo[] = prev.map((t) => (t.id === todoId ? { ...t, priority: newPriority } : t));
       saveTodosToStorage(updated);
       return updated;
     });
+    todoApi.update(todoId, { priority: newPriority }).catch(() => {});
   };
 
-  const handleStatusToggle = async (todo: Todo) => {
+  const handleStatusToggle = (todo: Todo) => {
     const next: Todo['status'] = todo.status === 'done' ? 'todo' : todo.status === 'todo' ? 'in_progress' : 'done';
     if (next === 'done') {
-      // Must pass 10-question quiz to complete
+      const subtopics = todo.subItems?.map((s) => s.text) || [];
+      if (!isQuizzableTopic(todo.title, subtopics)) {
+        // Non-study task (e.g. "go home", "buy groceries") — complete immediately without quiz!
+        setTodos((prev) => {
+          const updated: Todo[] = prev.map((t) => {
+            if (t.id !== todo.id) return t;
+            const subItems = t.subItems ? t.subItems.map((s) => ({ ...s, completed: true })) : [];
+            return {
+              ...t,
+              status: 'done',
+              subItems: subItems.length > 0 ? subItems : t.subItems,
+            };
+          });
+          saveTodosToStorage(updated);
+          return updated;
+        });
+        todoApi.update(todo.id, { status: 'done' }).catch(() => {});
+        return;
+      }
+
+      // Must pass 10-question quiz to complete study tasks
       setQuizModalTodo(todo);
       setShowQuizModal(true);
       return;
     }
 
-    try {
-      await todoApi.update(todo.id, { status: next }).catch(() => {});
-    } catch { /* */ }
+    // Instant optimistic update (zero latency / lag)
     setTodos((prev) => {
       const updated: Todo[] = prev.map((t) => (t.id === todo.id ? { ...t, status: next } : t));
       saveTodosToStorage(updated);
       return updated;
     });
+    todoApi.update(todo.id, { status: next }).catch(() => {});
   };
 
   // Direct status update (from Side Menu status dropdown)
-  const handleUpdateTaskStatus = async (todoId: string, newStatus: Todo['status']) => {
+  const handleUpdateTaskStatus = (todoId: string, newStatus: Todo['status']) => {
     const target = todos.find((t) => t.id === todoId);
     if (newStatus === 'done' && target && target.status !== 'done') {
+      const subtopics = target.subItems?.map((s) => s.text) || [];
+      if (!isQuizzableTopic(target.title, subtopics)) {
+        // Non-study task — complete immediately without quiz!
+        setTodos((prev) => {
+          const updated: Todo[] = prev.map((t) => {
+            if (t.id !== todoId) return t;
+            const subItems = t.subItems ? t.subItems.map((s) => ({ ...s, completed: true })) : [];
+            return {
+              ...t,
+              status: 'done',
+              subItems: subItems.length > 0 ? subItems : t.subItems,
+            };
+          });
+          saveTodosToStorage(updated);
+          return updated;
+        });
+        todoApi.update(todoId, { status: 'done' }).catch(() => {});
+        return;
+      }
+
       // Must pass 10-question quiz to complete
       setQuizModalTodo(target);
       setShowQuizModal(true);
       return;
     }
 
-    try {
-      await todoApi.update(todoId, { status: newStatus }).catch(() => {});
-    } catch { /* */ }
+    // Instant optimistic update
     setTodos((prev) => {
       const updated: Todo[] = prev.map((t) => (t.id === todoId ? { ...t, status: newStatus } : t));
       saveTodosToStorage(updated);
       return updated;
     });
+    todoApi.update(todoId, { status: newStatus }).catch(() => {});
   };
 
   // Called when student passes quiz with >= 7/10

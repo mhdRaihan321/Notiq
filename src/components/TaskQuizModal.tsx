@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   CheckCircle2,
@@ -14,6 +14,7 @@ import {
   Check,
   Award,
   AlertTriangle,
+  AlertCircle,
   Lightbulb,
 } from 'lucide-react';
 import {
@@ -21,6 +22,7 @@ import {
   WrongQuestionDetail,
   generateQuizForTopic,
   generateRelearnPlan,
+  isQuizzableTopic,
 } from '@/lib/aiService';
 
 interface TaskQuizModalProps {
@@ -49,6 +51,7 @@ export default function TaskQuizModal({
 }: TaskQuizModalProps) {
   const [mounted, setMounted] = useState(false);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
+  const [quizError, setQuizError] = useState(false);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({});
@@ -62,6 +65,40 @@ export default function TaskQuizModal({
     setMounted(true);
   }, []);
 
+  const fetchQuiz = useCallback(() => {
+    if (!todo) return;
+    const subtopics = todo.subItems?.map((s) => s.text) || [];
+
+    // If it's a non-study task, skip quiz directly
+    if (!isQuizzableTopic(todo.title, subtopics)) {
+      onPass(10);
+      onClose();
+      return;
+    }
+
+    setLoadingQuestions(true);
+    setQuizError(false);
+
+    generateQuizForTopic(todo.title, subtopics)
+      .then((qs) => {
+        if (!qs || qs.length === 0) {
+          setQuizError(true);
+          return;
+        }
+        setQuestions(qs);
+        if (onUpdateQuestions) {
+          onUpdateQuestions(todo.id, qs);
+        }
+      })
+      .catch((err) => {
+        console.error('Quiz generation error:', err);
+        setQuizError(true);
+      })
+      .finally(() => {
+        setLoadingQuestions(false);
+      });
+  }, [todo, onPass, onClose, onUpdateQuestions]);
+
   // Initialize or fetch questions when modal opens
   useEffect(() => {
     if (!isOpen || !todo) return;
@@ -72,37 +109,15 @@ export default function TaskQuizModal({
     setScore(0);
     setRelearnPlan('');
     setActiveTab('quiz');
+    setQuizError(false);
 
     if (todo.questions && todo.questions.length >= 10) {
       setQuestions(todo.questions);
       setLoadingQuestions(false);
     } else {
-      // Generate 10 questions on the fly
-      setLoadingQuestions(true);
-      const subtopics = todo.subItems?.map((s) => s.text) || [];
-      generateQuizForTopic(todo.title, subtopics)
-        .then((qs) => {
-          if (qs.length === 0) {
-            // Non-study task or AI failed — auto-pass without quiz
-            onPass(10);
-            onClose();
-            return;
-          }
-          setQuestions(qs);
-          if (onUpdateQuestions) {
-            onUpdateQuestions(todo.id, qs);
-          }
-        })
-        .catch(() => {
-          // Total failure — let user complete without quiz
-          onPass(10);
-          onClose();
-        })
-        .finally(() => {
-          setLoadingQuestions(false);
-        });
+      fetchQuiz();
     }
-  }, [isOpen, todo]);
+  }, [isOpen, todo, fetchQuiz]);
 
   if (!isOpen || !todo || !mounted || typeof document === 'undefined') return null;
 
@@ -342,6 +357,82 @@ export default function TaskQuizModal({
             <p style={{ margin: 0, fontSize: 13, color: '#a1a1aa', maxWidth: 440 }}>
               Formulating specific conceptual, practical, and code-based questions based on "{todo.title}" and its curriculum subtopics.
             </p>
+          </div>
+        )}
+
+        {/* Error / Empty State */}
+        {!loadingQuestions && questions.length === 0 && (
+          <div
+            style={{
+              padding: '60px 24px',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <div
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: '50%',
+                background: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 16,
+              }}
+            >
+              <AlertCircle size={26} color="#ef4444" />
+            </div>
+            <h4 style={{ margin: '0 0 8px', fontSize: 17, fontWeight: 600 }}>
+              Could not generate evaluation questions
+            </h4>
+            <p style={{ margin: '0 0 24px', fontSize: 13, color: '#a1a1aa', maxWidth: 440, lineHeight: 1.5 }}>
+              The AI quiz generator is temporarily busy or encountered a network error. You can retry generating questions, or complete the task directly.
+            </p>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <button
+                onClick={fetchQuiz}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 10,
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)',
+                  color: '#fff',
+                  border: 'none',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  boxShadow: '0 4px 14px rgba(124, 58, 237, 0.4)',
+                }}
+              >
+                <RotateCcw size={15} />
+                <span>Retry Generation</span>
+              </button>
+              <button
+                onClick={() => {
+                  onPass(10);
+                  onClose();
+                }}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: 10,
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  color: '#e4e4e7',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                Skip Quiz & Complete Task
+              </button>
+            </div>
           </div>
         )}
 
