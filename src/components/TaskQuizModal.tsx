@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   CheckCircle2,
@@ -65,43 +65,61 @@ export default function TaskQuizModal({
     setMounted(true);
   }, []);
 
-  const fetchQuiz = useCallback(() => {
-    if (!todo) return;
-    const subtopics = todo.subItems?.map((s) => s.text) || [];
+  // Track which todo ID has already been fetched or loaded so we NEVER loop
+  const loadedTodoIdRef = useRef<string | null>(null);
+  const isFetchingRef = useRef(false);
+
+  // Keep latest callbacks in refs so they never cause re-fetching
+  const onPassRef = useRef(onPass);
+  onPassRef.current = onPass;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const onUpdateQuestionsRef = useRef(onUpdateQuestions);
+  onUpdateQuestionsRef.current = onUpdateQuestions;
+
+  const executeQuizFetch = useCallback(async (targetTodo: NonNullable<TaskQuizModalProps['todo']>) => {
+    if (isFetchingRef.current) return;
+    const subtopics = targetTodo.subItems?.map((s) => s.text) || [];
 
     // If it's a non-study task, skip quiz directly
-    if (!isQuizzableTopic(todo.title, subtopics)) {
-      onPass(10);
-      onClose();
+    if (!isQuizzableTopic(targetTodo.title, subtopics)) {
+      onPassRef.current(10);
+      onCloseRef.current();
       return;
     }
 
     setLoadingQuestions(true);
     setQuizError(false);
+    isFetchingRef.current = true;
 
-    generateQuizForTopic(todo.title, subtopics)
-      .then((qs) => {
-        if (!qs || qs.length === 0) {
-          setQuizError(true);
-          return;
-        }
-        setQuestions(qs);
-        if (onUpdateQuestions) {
-          onUpdateQuestions(todo.id, qs);
-        }
-      })
-      .catch((err) => {
-        console.error('Quiz generation error:', err);
+    try {
+      const qs = await generateQuizForTopic(targetTodo.title, subtopics);
+      if (!qs || qs.length === 0) {
         setQuizError(true);
-      })
-      .finally(() => {
-        setLoadingQuestions(false);
-      });
-  }, [todo, onPass, onClose, onUpdateQuestions]);
+      } else {
+        setQuestions(qs);
+        onUpdateQuestionsRef.current?.(targetTodo.id, qs);
+      }
+    } catch (err) {
+      console.error('Quiz generation error:', err);
+      setQuizError(true);
+    } finally {
+      setLoadingQuestions(false);
+      isFetchingRef.current = false;
+    }
+  }, []);
 
   // Initialize or fetch questions when modal opens
   useEffect(() => {
-    if (!isOpen || !todo) return;
+    if (!isOpen || !todo) {
+      loadedTodoIdRef.current = null;
+      isFetchingRef.current = false;
+      return;
+    }
+
+    // Guard against infinite loop: do not re-run if already loaded for this todo ID
+    if (loadedTodoIdRef.current === todo.id) return;
+    loadedTodoIdRef.current = todo.id;
 
     setCurrentIdx(0);
     setSelectedAnswers({});
@@ -114,10 +132,17 @@ export default function TaskQuizModal({
     if (todo.questions && todo.questions.length >= 10) {
       setQuestions(todo.questions);
       setLoadingQuestions(false);
-    } else {
-      fetchQuiz();
+      return;
     }
-  }, [isOpen, todo, fetchQuiz]);
+
+    executeQuizFetch(todo);
+  }, [isOpen, todo?.id, executeQuizFetch]);
+
+  const handleRetry = () => {
+    if (!todo) return;
+    isFetchingRef.current = false;
+    executeQuizFetch(todo);
+  };
 
   if (!isOpen || !todo || !mounted || typeof document === 'undefined') return null;
 
@@ -395,7 +420,7 @@ export default function TaskQuizModal({
             </p>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <button
-                onClick={fetchQuiz}
+                onClick={handleRetry}
                 style={{
                   padding: '10px 20px',
                   borderRadius: 10,
